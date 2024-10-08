@@ -1,0 +1,3 @@
+# Python and general ignore rules
+__pycache__/
+*.py[cod]
