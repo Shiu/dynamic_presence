@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Run Home Assistant Core",
+        "type": "shell",
+        "command": "/bin/bash",
+        "args": [
+          "-c",
+          "source /home/shiu/dev/homeassistant-core/venv/bin/activate && hass -c /home/shiu/dev/homeassistant-core/config"
+        ],
+        "group": "test",
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        },
+        "problemMatcher": []
+      }
+    ]
+  }
+  
