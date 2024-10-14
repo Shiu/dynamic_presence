@@ -3,29 +3,43 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN
 from .entity import DynamicPresenceEntity
 
 
-class DynamicPresenceTimerSensor(DynamicPresenceEntity, SensorEntity):
-    """Representation of a Dynamic Presence timer sensor."""
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+    """Set up the Dynamic Presence sensor entities."""
+    controller = hass.data[DOMAIN][entry.entry_id]["controller"]
+    async_add_entities([DynamicPresenceStateSensor(entry, controller)])
 
-    def __init__(self, config_entry: ConfigEntry, timer_type: str):
-        """Initialize the sensor."""
-        super().__init__(config_entry)
-        self._timer_type = timer_type
-        self._attr_name = f"{timer_type.replace('_', ' ').title()} Timer"
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{timer_type}_timer"
+class DynamicPresenceStateSensor(DynamicPresenceEntity, SensorEntity):
+    """Representation of a Dynamic Presence state sensor."""
+
+    def __init__(self, entry: ConfigEntry, controller):
+        """Initialize the sensor entity."""
+        super().__init__(entry)
+        self._controller = controller
+        self._attr_name = "Dynamic Presence State"
+        self._attr_unique_id = f"{entry.entry_id}_state"
+
+    async def async_added_to_hass(self):
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{DOMAIN}_{self.config_entry.entry_id}_update",
+                self.async_write_ha_state
+            )
+        )
 
     @property
-    def state(self):
-        """Return the state of the sensor."""
-        controller = self.hass.data[DOMAIN][self.config_entry.entry_id]["controller"]
-        return controller.get_timer_state(self._timer_type)
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    """Set up the Dynamic Presence timer sensors."""
-    timer_types = ["presence", "active_room", "night_mode"]
-    entities = [DynamicPresenceTimerSensor(entry, timer_type) for timer_type in timer_types]
-    async_add_entities(entities)
+    def native_value(self) -> str:
+        """Return the current state."""
+        if self._controller.is_active_room:
+            return "Active"
+        if self._controller.presence_start_time is not None:
+            return "Occupied"
+        return "Vacant"

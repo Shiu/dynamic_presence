@@ -1,5 +1,5 @@
 """Time platform for Dynamic Presence integration."""
-from datetime import datetime, time  # type: ignore[name-shadowing]
+from datetime import time  # type: ignore[name-shadowing]
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
@@ -13,34 +13,33 @@ from .entity import DynamicPresenceEntity
 class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
     """Representation of a Dynamic Presence time setting."""
 
-    def __init__(self, config_entry: ConfigEntry, key: str, name: str) -> None:
+    def __init__(self, entry: ConfigEntry, controller, key: str, name: str):
         """Initialize the time entity."""
-        super().__init__(config_entry)
+        super().__init__(entry)
+        self._controller = controller
         self._key = key
-        self._attr_name = f"{name}"
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{key}"
+        self._attr_name = f"Dynamic Presence {name}"
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     @property
     def native_value(self) -> time:
-        """Return the time value."""
-        time_str = self.hass.data[DOMAIN][self.config_entry.entry_id].get("data", {}).get(self._key, "00:00")
-        try:
-            # Try parsing with seconds
-            return datetime.strptime(time_str, "%H:%M:%S").time()
-        except ValueError:
-            # If that fails, try parsing without seconds
-            return datetime.strptime(time_str, "%H:%M").time()
+        """Return the current time value."""
+        time_str = self._controller.config_entry.data.get(self._key, "00:00")
+        hour, minute = map(int, time_str.split(":"))
+        return time(hour, minute)
 
     async def async_set_value(self, value: time) -> None:
-        """Set the time."""
-        time_str = value.strftime("%H:%M")
-        self.hass.data[DOMAIN][self.config_entry.entry_id]["data"][self._key] = time_str
-        self.async_write_ha_state()
+        """Update the current time value."""
+        new_data = dict(self._controller.config_entry.data)
+        new_data[self._key] = value.strftime("%H:%M")
+        self.hass.config_entries.async_update_entry(self._controller.config_entry, data=new_data)
+        await self._controller.async_update_config()
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the Dynamic Presence time entities."""
-    entities = [
-        DynamicPresenceTime(entry, CONF_NIGHT_MODE_START, "Night Mode Start"),
-        DynamicPresenceTime(entry, CONF_NIGHT_MODE_END, "Night Mode End"),
-    ]
-    async_add_entities(entities)
+    controller = hass.data[DOMAIN][entry.entry_id]["controller"]
+    async_add_entities([
+        DynamicPresenceTime(entry, controller, CONF_NIGHT_MODE_START, "Night Mode Start"),
+        DynamicPresenceTime(entry, controller, CONF_NIGHT_MODE_END, "Night Mode End"),
+    ])

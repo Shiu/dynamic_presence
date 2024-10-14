@@ -5,38 +5,36 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .controller import DynamicPresenceController
 from .entity import DynamicPresenceEntity
 
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+    """Set up the Dynamic Presence switch."""
+    controller = hass.data[DOMAIN][entry.entry_id]["controller"]
+    async_add_entities([DynamicPresenceSwitch(entry, controller)])
 
 class DynamicPresenceSwitch(DynamicPresenceEntity, SwitchEntity):
     """Representation of a Dynamic Presence switch."""
 
-    def __init__(self, config_entry: ConfigEntry, key: str, name: str) -> None:
-        """Initialize the switch entity."""
-        super().__init__(config_entry)
-        self._key = key
-        self._attr_name = f"{name}"
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{key}"
+    def __init__(self, entry: ConfigEntry, controller: DynamicPresenceController):
+        """Initialize the switch."""
+        super().__init__(entry)
+        self._controller = controller
+        self._attr_name = "Dynamic Presence"
+        self._attr_unique_id = f"{entry.entry_id}_dynamic_presence"
 
     @property
     def is_on(self) -> bool:
-        """Return true if switch is on."""
-        return self.hass.data[DOMAIN][self.config_entry.entry_id].get("data", {}).get(self._key, True)
+        """Return true if the switch is on."""
+        return self._controller.is_enabled
 
-    async def async_turn_on(self, **kwargs) -> None:
+    async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
-        self.hass.data[DOMAIN][self.config_entry.entry_id]["data"][self._key] = True
+        await self._controller.enable()
         self.async_write_ha_state()
 
-    async def async_turn_off(self, **kwargs) -> None:
+    async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
-        self.hass.data[DOMAIN][self.config_entry.entry_id]["data"][self._key] = False
+        await self._controller.disable()
         self.async_write_ha_state()
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    """Set up the Dynamic Presence switch entities."""
-    entities = [
-        DynamicPresenceSwitch(entry, "enabled", "Enabled"),
-        # Add any other switches you want to create here
-    ]
-    async_add_entities(entities)
