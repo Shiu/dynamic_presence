@@ -86,10 +86,10 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""
-        errors = {}
         if user_input is not None:
-            # Validate and process user input here
-            # If valid, update the config entry
+            # Update both data and options
+            new_data = {**self.config_entry.data, **user_input}
+            self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
             return self.async_create_entry(title="", data=user_input)
 
         options = {**self.config_entry.data, **self.config_entry.options}
@@ -114,5 +114,5 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=data_schema,
-            errors=errors,
+            errors={},
         )

@@ -21,8 +21,9 @@ class DynamicPresenceSwitch(DynamicPresenceEntity, SwitchEntity):
         """Initialize the switch."""
         super().__init__(entry)
         self._controller = controller
+        self.entity_id = self.generate_entity_id("switch", "switch")
         self._attr_name = "Dynamic Presence"
-        self._attr_unique_id = f"{entry.entry_id}_dynamic_presence"
+        self._attr_unique_id = f"{entry.entry_id}_switch"
 
     @property
     def is_on(self) -> bool:

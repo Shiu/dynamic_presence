@@ -1,11 +1,15 @@
 """Controller for Dynamic Presence integration."""
-from datetime import datetime
+from datetime import timedelta
 import logging
 
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+)
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
@@ -72,8 +76,10 @@ class DynamicPresenceController:
         _LOGGER.debug("Presence sensor %s changed to %s", event.data.get('entity_id'), new_state.state)
 
         if new_state.state == STATE_ON:
+            _LOGGER.debug("Presence detected, calling handle_presence_detected")
             self.hass.async_create_task(self.handle_presence_detected())
         elif new_state.state == STATE_OFF:
+            _LOGGER.debug("Presence cleared, calling handle_presence_clear")
             self.hass.async_create_task(self.handle_presence_clear())
 
     async def handle_presence_detected(self):
@@ -83,16 +89,10 @@ class DynamicPresenceController:
         await self.turn_on_entities()
 
         if self.presence_start_time is None:
-            self.presence_start_time = datetime.now()
-            self.start_timer("active_room", self.active_room_threshold)
-        elif not self.is_active_room:
-            elapsed_time = (datetime.now() - self.presence_start_time).total_seconds()
-            if elapsed_time >= self.active_room_threshold:
-                _LOGGER.debug("Room became active")
-                self.is_active_room = True
-                self.cancel_timer("active_room")
+            self.presence_start_time = dt_util.utcnow()
+            _LOGGER.debug("Starting active room timer for %s seconds", self.active_room_threshold)
+            self.start_timer("active_room")
 
-        # Notify the sensor entity
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
 
     async def handle_presence_clear(self):
@@ -100,20 +100,28 @@ class DynamicPresenceController:
         _LOGGER.debug("Presence cleared")
         self.cancel_timer("active_room")
         timeout = self.active_room_timeout if self.is_active_room else self.presence_timeout
-        self.start_timer("presence", timeout)
+        _LOGGER.debug("Starting presence timer for %s seconds", timeout)
+        self.start_timer("presence")
         self.presence_start_time = None
         self.is_active_room = False
 
-        # Notify the sensor entity
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
 
-    def start_timer(self, timer_type: str, duration: int):
+    def start_timer(self, timer_type: str, duration: int | None = None):
         """Start a timer."""
+        if duration is None:
+            if timer_type == "presence":
+                duration = self.presence_timeout
+            elif timer_type == "active_room":
+                duration = self.active_room_threshold
+
         _LOGGER.debug("Starting %s timer for %s seconds", timer_type, duration)
         self.cancel_timer(timer_type)
-        self._timers[timer_type] = async_call_later(
-            self.hass, duration, self.timer_expired_callback(timer_type)
+        expiration_time = dt_util.utcnow() + timedelta(seconds=duration)
+        self._timers[timer_type] = async_track_point_in_time(
+            self.hass, self.timer_expired_callback(timer_type), expiration_time
         )
+        _LOGGER.debug("%s timer started, will expire at %s", timer_type, expiration_time)
 
     def cancel_timer(self, timer_type: str):
         """Cancel a timer."""
@@ -130,25 +138,25 @@ class DynamicPresenceController:
             _LOGGER.debug("%s timer expired", timer_type)
             self._timers[timer_type] = None
             if timer_type == "presence":
+                _LOGGER.debug("Presence timer expired, turning off entities")
                 self.hass.async_create_task(self.turn_off_entities())
             elif timer_type == "active_room":
                 if self.hass.states.get(self.presence_sensor).state == STATE_ON:
                     _LOGGER.debug("Room became active")
                     self.is_active_room = True
 
-            # Notify the sensor entity
             async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
         return timer_callback
 
     async def turn_on_entities(self):
         """Turn on controlled entities."""
-        _LOGGER.debug("Turning on controlled entities")
+        _LOGGER.debug("Turning on controlled entities: %s", self.controlled_entities)
         for entity_id in self.controlled_entities:
             await self.hass.services.async_call('homeassistant', 'turn_on', {'entity_id': entity_id})
 
     async def turn_off_entities(self):
         """Turn off controlled entities."""
-        _LOGGER.debug("Turning off controlled entities")
+        _LOGGER.debug("Turning off controlled entities: %s", self.controlled_entities)
         for entity_id in self.controlled_entities:
             await self.hass.services.async_call('homeassistant', 'turn_off', {'entity_id': entity_id})
 
@@ -164,8 +172,14 @@ class DynamicPresenceController:
 
     async def async_update_config(self):
         """Update the controller configuration."""
+        _LOGGER.info("Updating controller configuration")
         # Re-initialize relevant variables from the updated config
         self.presence_timeout = self.config_entry.data[CONF_PRESENCE_TIMEOUT]
         self.active_room_threshold = self.config_entry.data[CONF_ACTIVE_ROOM_THRESHOLD] * 60
         self.active_room_timeout = self.config_entry.data[CONF_ACTIVE_ROOM_TIMEOUT]
-        # You might need to update other variables or restart timers here
+
+        _LOGGER.info("Controller configuration updated: presence_timeout=%s, active_room_threshold=%s, active_room_timeout=%s",
+                     self.presence_timeout, self.active_room_threshold, self.active_room_timeout)
+
+        # Temporarily comment out the dispatcher send
+        # async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")

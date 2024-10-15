@@ -21,6 +21,11 @@ class DynamicPresenceEntity(Entity):
             sw_version=VERSION,
         )
 
+    def generate_entity_id(self, platform: str, entity_type: str) -> str:
+        """Generate a consistent entity ID."""
+        room_name = self.config_entry.title.lower().replace(' ', '_')
+        return f"{platform}.{room_name}_{entity_type}"
+
     @property
     def should_poll(self) -> bool:
         """Return False as entity pushes its state to HA."""

@@ -2,8 +2,8 @@
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import DynamicPresenceEntity
@@ -21,7 +21,8 @@ class DynamicPresenceStateSensor(DynamicPresenceEntity, SensorEntity):
         """Initialize the sensor entity."""
         super().__init__(entry)
         self._controller = controller
-        self._attr_name = "Dynamic Presence State"
+        self.entity_id = self.generate_entity_id("sensor", "state")
+        self._attr_name = "State"
         self._attr_unique_id = f"{entry.entry_id}_state"
 
     async def async_added_to_hass(self):
@@ -30,7 +31,7 @@ class DynamicPresenceStateSensor(DynamicPresenceEntity, SensorEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                f"{DOMAIN}_{self.config_entry.entry_id}_update",
+                f"{self.config_entry.entry_id}_update",
                 self.async_write_ha_state
             )
         )
@@ -43,3 +44,4 @@ class DynamicPresenceStateSensor(DynamicPresenceEntity, SensorEntity):
         if self._controller.presence_start_time is not None:
             return "Occupied"
         return "Vacant"
+

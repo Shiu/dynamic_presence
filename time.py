@@ -18,7 +18,8 @@ class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
         super().__init__(entry)
         self._controller = controller
         self._key = key
-        self._attr_name = f"Dynamic Presence {name}"
+        self.entity_id = self.generate_entity_id("time", key)
+        self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     @property
