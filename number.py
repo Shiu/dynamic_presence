@@ -3,16 +3,10 @@ import logging
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    CONF_ACTIVE_ROOM_THRESHOLD,
-    CONF_ACTIVE_ROOM_TIMEOUT,
-    CONF_NIGHT_MODE_TIMEOUT,
-    CONF_PRESENCE_TIMEOUT,
-    DOMAIN,
-)
+from .const import DOMAIN, NUMBER_CONFIG
 from .entity import DynamicPresenceEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,46 +15,45 @@ _LOGGER = logging.getLogger(__name__)
 class DynamicPresenceNumber(DynamicPresenceEntity, NumberEntity):
     """Representation of a Dynamic Presence number setting."""
 
-    def __init__(self, entry: ConfigEntry, controller, key: str, name: str, min_value: float, max_value: float, step: float):
+    def __init__(self, entry: ConfigEntry, controller, key: str):
         """Initialize the number entity."""
         super().__init__(entry)
         self._controller = controller
         self._key = key
         self.entity_id = self.generate_entity_id("number", key)
-        self._attr_name = name
+        self._attr_name = NUMBER_CONFIG[key]["name"]
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_native_min_value = min_value
-        self._attr_native_max_value = max_value
-        self._attr_native_step = step
+        self._attr_native_min_value = NUMBER_CONFIG[key]["min"]
+        self._attr_native_max_value = NUMBER_CONFIG[key]["max"]
+        self._attr_native_step = NUMBER_CONFIG[key]["step"]
+        self._attr_native_unit_of_measurement = NUMBER_CONFIG[key]["unit"]
 
     @property
     def native_value(self) -> float:
         """Return the current value."""
-        value = self._controller.config_entry.data.get(self._key)
-        _LOGGER.debug("Getting native value for %s: %s", self._key, value)
-        return value
+        return self._controller.config_entry.data.get(self._key, NUMBER_CONFIG[self._key]["default"])
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
-        _LOGGER.debug("Attempting to set %s to %s", self._key, value)
-        if value != self.native_value:
-            _LOGGER.info("Updating %s from %s to %s", self._key, self.native_value, value)
-            new_data = dict(self._controller.config_entry.data)
-            new_data[self._key] = value
-            self.hass.config_entries.async_update_entry(self._controller.config_entry, data=new_data)
-            # Temporarily comment out the controller update
-            # await self._controller.async_update_config()
-            _LOGGER.info("Updated %s to %s", self._key, value)
-        else:
-            _LOGGER.debug("Value for %s unchanged, skipping update", self._key)
+        await self._controller.async_update_config({self._key: int(value)})
+        self.async_write_ha_state()
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._controller.async_add_listener(self._handle_coordinator_update)
+        )
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the Dynamic Presence number entities."""
     controller = hass.data[DOMAIN][entry.entry_id]["controller"]
     async_add_entities([
-        DynamicPresenceNumber(entry, controller, CONF_PRESENCE_TIMEOUT, "Presence Timeout", 0, 3600, 1),
-        DynamicPresenceNumber(entry, controller, CONF_ACTIVE_ROOM_THRESHOLD, "Active Room Threshold", 0, 60, 1),
-        DynamicPresenceNumber(entry, controller, CONF_ACTIVE_ROOM_TIMEOUT, "Active Room Timeout", 0, 3600, 1),
-        DynamicPresenceNumber(entry, controller, CONF_NIGHT_MODE_TIMEOUT, "Night Mode Timeout", 0, 3600, 1),
+        DynamicPresenceNumber(entry, controller, key)
+        for key in NUMBER_CONFIG
     ])

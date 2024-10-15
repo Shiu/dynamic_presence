@@ -9,23 +9,27 @@ from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_state_change_event,
 )
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_ACTIVE_ROOM_TIMEOUT,
+    CONF_NIGHT_MODE_END,
+    CONF_NIGHT_MODE_START,
+    CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_TIMEOUT,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-class DynamicPresenceController:
+class DynamicPresenceController(DataUpdateCoordinator):
     """Controller class for Dynamic Presence integration."""
 
     def __init__(self, hass: HomeAssistant, config_entry):
         """Initialize the Dynamic Presence controller."""
-        self.hass = hass
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=1))
         self.config_entry = config_entry
         self.presence_sensor = config_entry.data['presence_sensor']
         self.controlled_entities = config_entry.data['controlled_entities']
@@ -37,6 +41,10 @@ class DynamicPresenceController:
         self.presence_start_time = None
         self.is_active_room = False
         self._enabled = True  # Set to True by default
+        self.night_mode_start = config_entry.data.get(CONF_NIGHT_MODE_START, "22:00")
+        self.night_mode_end = config_entry.data.get(CONF_NIGHT_MODE_END, "06:00")
+        self.night_mode_timeout = config_entry.data.get(CONF_NIGHT_MODE_TIMEOUT, 3600)  # Default to 1 hour
+        self._listeners = []  # Initialize as a list
 
     @property
     def is_enabled(self) -> bool:
@@ -93,6 +101,7 @@ class DynamicPresenceController:
             _LOGGER.debug("Starting active room timer for %s seconds", self.active_room_threshold)
             self.start_timer("active_room")
 
+        _LOGGER.debug("Current state: presence_start_time=%s, is_active_room=%s", self.presence_start_time, self.is_active_room)
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
 
     async def handle_presence_clear(self):
@@ -105,6 +114,7 @@ class DynamicPresenceController:
         self.presence_start_time = None
         self.is_active_room = False
 
+        _LOGGER.debug("Current state: presence_start_time=%s, is_active_room=%s", self.presence_start_time, self.is_active_room)
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
 
     def start_timer(self, timer_type: str, duration: int | None = None):
@@ -145,6 +155,7 @@ class DynamicPresenceController:
                     _LOGGER.debug("Room became active")
                     self.is_active_room = True
 
+            _LOGGER.debug("Current state: presence_start_time=%s, is_active_room=%s", self.presence_start_time, self.is_active_room)
             async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
         return timer_callback
 
@@ -170,16 +181,33 @@ class DynamicPresenceController:
                 timer()
         self._timers.clear()
 
-    async def async_update_config(self):
+    async def async_update_config(self, changes):
         """Update the controller configuration."""
         _LOGGER.info("Updating controller configuration")
-        # Re-initialize relevant variables from the updated config
-        self.presence_timeout = self.config_entry.data[CONF_PRESENCE_TIMEOUT]
-        self.active_room_threshold = self.config_entry.data[CONF_ACTIVE_ROOM_THRESHOLD] * 60
-        self.active_room_timeout = self.config_entry.data[CONF_ACTIVE_ROOM_TIMEOUT]
+        new_data = dict(self.config_entry.data)
+        new_data.update(changes)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
 
-        _LOGGER.info("Controller configuration updated: presence_timeout=%s, active_room_threshold=%s, active_room_timeout=%s",
-                     self.presence_timeout, self.active_room_threshold, self.active_room_timeout)
+        # Update relevant variables based on the changes
+        if CONF_PRESENCE_TIMEOUT in changes:
+            self.presence_timeout = int(new_data[CONF_PRESENCE_TIMEOUT])
+        if CONF_ACTIVE_ROOM_THRESHOLD in changes:
+            self.active_room_threshold = int(new_data[CONF_ACTIVE_ROOM_THRESHOLD])
+        if CONF_ACTIVE_ROOM_TIMEOUT in changes:
+            self.active_room_timeout = int(new_data[CONF_ACTIVE_ROOM_TIMEOUT])
+        if CONF_NIGHT_MODE_TIMEOUT in changes:
+            self.night_mode_timeout = int(new_data[CONF_NIGHT_MODE_TIMEOUT])
+        if CONF_NIGHT_MODE_START in changes:
+            self.night_mode_start = new_data[CONF_NIGHT_MODE_START]
+        if CONF_NIGHT_MODE_END in changes:
+            self.night_mode_end = new_data[CONF_NIGHT_MODE_END]
 
-        # Temporarily comment out the dispatcher send
-        # async_dispatcher_send(self.hass, f"{DOMAIN}_{self.config_entry.entry_id}_update")
+        _LOGGER.info("Controller configuration updated: presence_timeout=%d, active_room_threshold=%d, active_room_timeout=%d, night_mode_timeout=%d, night_mode_start=%s, night_mode_end=%s",
+                     self.presence_timeout, self.active_room_threshold, self.active_room_timeout, self.night_mode_timeout, self.night_mode_start, self.night_mode_end)
+
+        async_dispatcher_send(self.hass, f"{self.config_entry.entry_id}_update")
+
+    def async_add_listener(self, listener):
+        """Add a listener for configuration changes."""
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener)

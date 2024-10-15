@@ -1,4 +1,6 @@
 """Sensor platform for Dynamic Presence integration."""
+import logging
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -8,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .entity import DynamicPresenceEntity
 
+_LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the Dynamic Presence sensor entities."""
@@ -39,9 +42,11 @@ class DynamicPresenceStateSensor(DynamicPresenceEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         """Return the current state."""
+        state = "Vacant"
         if self._controller.is_active_room:
-            return "Active"
-        if self._controller.presence_start_time is not None:
-            return "Occupied"
-        return "Vacant"
-
+            state = "Active"
+        elif self._controller.presence_start_time is not None:
+            state = "Occupied"
+        _LOGGER.debug("Sensor state: %s, controller state: is_active_room=%s, presence_start_time=%s",
+                      state, self._controller.is_active_room, self._controller.presence_start_time)
+        return state

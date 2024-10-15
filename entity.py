@@ -20,6 +20,7 @@ class DynamicPresenceEntity(Entity):
             model="Dynamic Presence Controller",
             sw_version=VERSION,
         )
+        self._remove_listener = None
 
     def generate_entity_id(self, platform: str, entity_type: str) -> str:
         """Generate a consistent entity ID."""
@@ -30,3 +31,23 @@ class DynamicPresenceEntity(Entity):
     def should_poll(self) -> bool:
         """Return False as entity pushes its state to HA."""
         return False
+
+    @property
+    def device_info(self):
+        """Return device information about this entity."""
+        return self._attr_device_info
+
+    async def async_added_to_hass(self):
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        self._remove_listener = self.config_entry.add_update_listener(self.async_config_entry_updated)
+
+    async def async_will_remove_from_hass(self):
+        """Run when entity will be removed from hass."""
+        await super().async_will_remove_from_hass()
+        if self._remove_listener:
+            self._remove_listener()
+
+    async def async_config_entry_updated(self, hass, entry):
+        """Handle config entry updates."""
+        # Implement this method in child classes if needed

@@ -18,15 +18,15 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_ACTIVE_ROOM_THRESHOLD,
-    CONF_ACTIVE_ROOM_TIMEOUT,
     CONF_CONTROLLED_ENTITIES,
     CONF_NIGHT_MODE_END,
     CONF_NIGHT_MODE_START,
-    CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_SENSOR,
-    CONF_PRESENCE_TIMEOUT,
+    CONFIG_OPTIONS_ORDER,
+    DEFAULT_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
     DOMAIN,
+    NUMBER_CONFIG,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,12 +63,21 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
                     domain=['light', 'switch', 'input_boolean']
                 )
             ),
-            vol.Required(CONF_PRESENCE_TIMEOUT, default=300): int,
-            vol.Required(CONF_ACTIVE_ROOM_THRESHOLD, default=15): int,
-            vol.Required(CONF_ACTIVE_ROOM_TIMEOUT, default=600): int,
-            vol.Required(CONF_NIGHT_MODE_START, default="22:00"): str,
-            vol.Required(CONF_NIGHT_MODE_END, default="07:00"): str,
-            vol.Required(CONF_NIGHT_MODE_TIMEOUT, default=60): int,
+            **{vol.Required(key, default=NUMBER_CONFIG[key]["default"] if key in NUMBER_CONFIG else
+                                         DEFAULT_NIGHT_MODE_START if key == CONF_NIGHT_MODE_START else
+                                         DEFAULT_NIGHT_MODE_END):
+               (selector.NumberSelector(
+                   selector.NumberSelectorConfig(
+                       min=NUMBER_CONFIG[key]["min"],
+                       max=NUMBER_CONFIG[key]["max"],
+                       step=NUMBER_CONFIG[key]["step"],
+                       mode="box",
+                       unit_of_measurement=NUMBER_CONFIG[key]["unit"]
+                   )
+               ) if key in NUMBER_CONFIG else
+                selector.TimeSelector() if key in [CONF_NIGHT_MODE_START, CONF_NIGHT_MODE_END] else
+                str)
+               for key in CONFIG_OPTIONS_ORDER}
         })
 
         return self.async_show_form(
@@ -103,12 +112,11 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                     domain=['light', 'switch', 'input_boolean']
                 )
             ),
-            vol.Required(CONF_PRESENCE_TIMEOUT, default=options.get(CONF_PRESENCE_TIMEOUT, 300)): int,
-            vol.Required(CONF_ACTIVE_ROOM_THRESHOLD, default=options.get(CONF_ACTIVE_ROOM_THRESHOLD, 15)): int,
-            vol.Required(CONF_ACTIVE_ROOM_TIMEOUT, default=options.get(CONF_ACTIVE_ROOM_TIMEOUT, 600)): int,
-            vol.Required(CONF_NIGHT_MODE_START, default=options.get(CONF_NIGHT_MODE_START, "22:00")): str,
-            vol.Required(CONF_NIGHT_MODE_END, default=options.get(CONF_NIGHT_MODE_END, "07:00")): str,
-            vol.Required(CONF_NIGHT_MODE_TIMEOUT, default=options.get(CONF_NIGHT_MODE_TIMEOUT, 60)): int,
+            **{vol.Required(key, default=options.get(key, NUMBER_CONFIG[key]["default"] if key in NUMBER_CONFIG else
+                                                          DEFAULT_NIGHT_MODE_START if key == CONF_NIGHT_MODE_START else
+                                                          DEFAULT_NIGHT_MODE_END)):
+               int if key in NUMBER_CONFIG else str
+               for key in CONFIG_OPTIONS_ORDER}
         })
 
         return self.async_show_form(
