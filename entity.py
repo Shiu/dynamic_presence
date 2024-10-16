@@ -1,18 +1,39 @@
 """Base entity for Dynamic Presence integration."""
+from homeassistant.helpers.entity import Entity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.entity import DeviceInfo, Entity
+from homeassistant.core import callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from typing import Any
 
 from .const import DOMAIN, NAME, VERSION
 
+class DynamicPresenceEntity(CoordinatorEntity, Entity):
+    """
+    Base class for Dynamic Presence entities.
+    
+    This class provides common functionality for all entities in the Dynamic Presence
+    integration. It inherits from CoordinatorEntity to leverage the data update
+    coordinator pattern, and from Entity to provide basic entity functionality.
+    """
 
-class DynamicPresenceEntity(Entity):
-    """Base class for Dynamic Presence entities."""
-
+    # Indicates that this entity uses the parent device's name as a prefix
     _attr_has_entity_name = True
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize the Dynamic Presence entity."""
+    def __init__(self, coordinator, config_entry: ConfigEntry, description) -> None:
+        """
+        Initialize the Dynamic Presence entity.
+        
+        Args:
+            coordinator: The data update coordinator.
+            config_entry: The config entry containing integration configuration.
+            description: EntityDescription object with entity metadata.
+        """
+        super().__init__(coordinator)
         self.config_entry = config_entry
+        self.entity_description = description
+        
+        # Set up device info for the entity
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
             name=config_entry.title,
@@ -20,34 +41,40 @@ class DynamicPresenceEntity(Entity):
             model="Dynamic Presence Controller",
             sw_version=VERSION,
         )
-        self._remove_listener = None
-
-    def generate_entity_id(self, platform: str, entity_type: str) -> str:
-        """Generate a consistent entity ID."""
-        room_name = self.config_entry.title.lower().replace(' ', '_')
-        return f"{platform}.{room_name}_{entity_type}"
+        
+        # Generate a unique ID for the entity
+        self._attr_unique_id = f"{config_entry.entry_id}_{description.key}"
 
     @property
     def should_poll(self) -> bool:
-        """Return False as entity pushes its state to HA."""
+        """
+        Determine if the entity should be polled for updates.
+        
+        Returns:
+            False, as the entity pushes its state to Home Assistant via the coordinator.
+        """
         return False
 
-    @property
-    def device_info(self):
-        """Return device information about this entity."""
-        return self._attr_device_info
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """
+        Handle updated data from the coordinator.
+        
+        This method is called when the coordinator has new data. It triggers
+        the entity to update its state in Home Assistant.
+        """
+        self.async_write_ha_state()
 
-    async def async_added_to_hass(self):
-        """Run when entity about to be added to hass."""
+    async def async_added_to_hass(self) -> None:
+        """
+        Set up the entity when it's added to Home Assistant.
+        
+        This method is called when the entity is added to Home Assistant.
+        It ensures that the entity has the latest state from the coordinator.
+        """
         await super().async_added_to_hass()
-        self._remove_listener = self.config_entry.add_update_listener(self.async_config_entry_updated)
+        self._handle_coordinator_update()
 
-    async def async_will_remove_from_hass(self):
-        """Run when entity will be removed from hass."""
-        await super().async_will_remove_from_hass()
-        if self._remove_listener:
-            self._remove_listener()
-
-    async def async_config_entry_updated(self, hass, entry):
-        """Handle config entry updates."""
-        # Implement this method in child classes if needed
+    def _get_coordinator_value(self, key: str, default: Any = None) -> Any:
+        """Get a value from the coordinator's data with a default."""
+        return self.coordinator.data.get(key, default)

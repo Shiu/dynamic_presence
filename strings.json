@@ -4,28 +4,16 @@
     "step": {
       "user": {
         "title": "Set up Dynamic Presence",
-        "description": "Dynamic Presence automatically controls lights and devices based on room occupancy. It uses presence sensors to detect when someone enters or leaves a room, adjusting device states accordingly. The integration features customizable timeouts, an 'active room' concept for extended device operation, and a night mode for reduced light activation during sleeping hours.",
+        "description": "Dynamic Presence automatically controls lights and devices based on room occupancy. It uses presence sensors to detect when someone enters or leaves a room, adjusting device states accordingly.",
         "data": {
-          "name": "Room Name",
+          "room_name": "Room Name",
           "presence_sensor": "Presence Sensor",
-          "controlled_entities": "Controlled Entities",
-          "presence_timeout": "Presence Timeout",
-          "active_room_threshold": "Active Room Threshold",
-          "active_room_timeout": "Active Room Timeout",
-          "night_mode_start": "Night Mode Start",
-          "night_mode_end": "Night Mode End",
-          "night_mode_timeout": "Night Mode Timeout"
+          "controlled_entities": "Controlled Entities"
         },
         "data_description": {
-          "name": "The name of the room where this Dynamic Presence configuration will be applied.",
+          "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
           "presence_sensor": "Select the binary sensor that detects presence in this room. This can be a motion sensor, mmWave sensor, or any binary sensor that indicates occupancy.",
-          "controlled_entities": "Select the entities to be controlled by Dynamic Presence. These can include lights, smart plugs, switches, or any entity that can be turned on or off based on room occupancy.",
-          "presence_timeout": "The time (in seconds) to wait before turning off controlled entities after the presence sensor reports no occupancy. Default: 300 seconds (5 minutes).",
-          "active_room_threshold": "The time (in minutes) of continuous occupancy required for the room to be considered 'active'. In active rooms, devices remain on for an extended period after occupancy ends. Default: 15 minutes.",
-          "active_room_timeout": "The extended time (in seconds) to wait before turning off controlled entities in an 'active' room after the presence sensor reports no occupancy. Default: 600 seconds (10 minutes).",
-          "night_mode_start": "The time when night mode begins. During night mode, the integration uses shorter timeouts to reduce light activation. Format: HH:MM (24-hour clock). Default: 22:00.",
-          "night_mode_end": "The time when night mode ends and normal operation resumes. Format: HH:MM (24-hour clock). Default: 07:00.",
-          "night_mode_timeout": "The reduced time (in seconds) to wait before turning off controlled entities during night mode after the presence sensor reports no occupancy. Default: 60 seconds."
+          "controlled_entities": "Select the entities to be controlled by Dynamic Presence. These can include lights, smart plugs, switches, or any entity that can be turned on or off based on room occupancy."
         }
       }
     }
@@ -36,7 +24,7 @@
         "title": "Configure Dynamic Presence",
         "description": "Adjust the settings for the Dynamic Presence integration in this room.",
         "data": {
-          "name": "Room Name",
+          "room_name": "Room Name",
           "presence_sensor": "Presence Sensor",
           "controlled_entities": "Controlled Entities",
           "presence_timeout": "Presence Timeout",
@@ -44,10 +32,14 @@
           "active_room_timeout": "Active Room Timeout",
           "night_mode_start": "Night Mode Start",
           "night_mode_end": "Night Mode End",
-          "night_mode_timeout": "Night Mode Timeout"
+          "night_mode_timeout": "Night Mode Timeout",
+          "night_mode_enable": "Enable Night Mode",
+          "night_mode_controlled_entities": "Night Mode Controlled Entities",
+          "night_mode_entities_behavior": "Night Mode Entities Behavior",
+          "night_mode_scale": "Night Mode Scale"
         },
         "data_description": {
-          "name": "The name of the room where this Dynamic Presence configuration will be applied.",
+          "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
           "presence_sensor": "Select the binary sensor that detects presence in this room. This can be a motion sensor, mmWave sensor, or any binary sensor that indicates occupancy.",
           "controlled_entities": "Select the entities to be controlled by Dynamic Presence. These can include lights, smart plugs, switches, or any entity that can be turned on or off based on room occupancy.",
           "presence_timeout": "The time (in seconds) to wait before turning off controlled entities after the presence sensor reports no occupancy. Default: 300 seconds (5 minutes).",
@@ -55,7 +47,11 @@
           "active_room_timeout": "The extended time (in seconds) to wait before turning off controlled entities in an 'active' room after the presence sensor reports no occupancy. Default: 600 seconds (10 minutes).",
           "night_mode_start": "The time when night mode begins. During night mode, the integration uses shorter timeouts to reduce light activation. Format: HH:MM (24-hour clock). Default: 22:00.",
           "night_mode_end": "The time when night mode ends and normal operation resumes. Format: HH:MM (24-hour clock). Default: 07:00.",
-          "night_mode_timeout": "The reduced time (in seconds) to wait before turning off controlled entities during night mode after the presence sensor reports no occupancy. Default: 60 seconds."
+          "night_mode_timeout": "The reduced time (in seconds) to wait before turning off controlled entities during night mode after the presence sensor reports no occupancy. Default: 60 seconds.",
+          "night_mode_enable": "Enable or disable night mode functionality.",
+          "night_mode_controlled_entities": "Select entities to be controlled specifically during night mode. If not set, regular controlled entities will be used.",
+          "night_mode_entities_behavior": "Choose how night mode entities behave: 'additive' (night mode entities are added to regular entities) or 'exclusive' (only night mode entities are used during night mode).",
+          "night_mode_scale": "Scale factor for adjusting light brightness during night mode. Values between 0.1 and 2.0 are allowed. Default: 0.5 (50% brightness)."
         }
       }
     }
