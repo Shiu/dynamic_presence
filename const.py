@@ -1,5 +1,9 @@
 """Constants for the Dynamic Presence integration."""
+
+import logging
 from homeassistant.const import UnitOfTime
+
+_LOGGER = logging.getLogger(__name__)
 
 # Basic integration information
 DOMAIN = "dynamic_presence"
@@ -32,7 +36,7 @@ NUMBER_CONFIG = {
         "max": 3600,
         "step": 1,
         "unit": UnitOfTime.SECONDS,
-        "default": 300
+        "default": 300,
     },
     CONF_ACTIVE_ROOM_TIMEOUT: {
         "name": "Active Room Timeout",
@@ -40,7 +44,7 @@ NUMBER_CONFIG = {
         "max": 3600,
         "step": 1,
         "unit": UnitOfTime.SECONDS,
-        "default": 600
+        "default": 600,
     },
     CONF_ACTIVE_ROOM_THRESHOLD: {
         "name": "Active Room Threshold",
@@ -48,7 +52,7 @@ NUMBER_CONFIG = {
         "max": 3600,
         "step": 1,
         "unit": UnitOfTime.SECONDS,
-        "default": 900
+        "default": 900,
     },
     CONF_NIGHT_MODE_TIMEOUT: {
         "name": "Night Mode Timeout",
@@ -56,7 +60,7 @@ NUMBER_CONFIG = {
         "max": 3600,
         "step": 1,
         "unit": UnitOfTime.SECONDS,
-        "default": 60
+        "default": 60,
     },
     CONF_NIGHT_MODE_SCALE: {  # Configuration for night mode scale
         "name": "Night Mode Scale",
@@ -64,8 +68,8 @@ NUMBER_CONFIG = {
         "max": 2,
         "step": 0.1,
         "unit": None,
-        "default": 0.5
-    }
+        "default": 0.5,
+    },
 }
 
 # Default values for time settings
@@ -86,8 +90,14 @@ CONFIG_OPTIONS_ORDER = [
 ]
 
 # Night mode entities behavior options
-NIGHT_MODE_BEHAVIOR_ADDITIVE = "additive"  # Night mode entities are added to normal mode entities
-NIGHT_MODE_BEHAVIOR_EXCLUSIVE = "exclusive"  # Only night mode entities are used during night mode
+NIGHT_MODE_BEHAVIOR_ADDITIVE = (
+    "additive"  # Night mode entities are added to normal mode entities
+)
+NIGHT_MODE_BEHAVIOR_EXCLUSIVE = (
+    "exclusive"  # Only night mode entities are used during night mode
+)
 
 # Default night mode entities behavior
 DEFAULT_NIGHT_MODE_ENTITIES_BEHAVIOR = NIGHT_MODE_BEHAVIOR_EXCLUSIVE
+
+_LOGGER.debug("Dynamic Presence constants loaded. Version: %s", VERSION)

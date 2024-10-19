@@ -17,36 +17,58 @@ from .const import (
 from .controller import DynamicPresenceController
 
 # Define the platforms used by this integration
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.TIME, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.SWITCH,
+    Platform.NUMBER,
+    Platform.TIME,
+    Platform.SENSOR,
+]
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
+    _LOGGER.info("Setting up Dynamic Presence integration")
+
     # Initialize the domain data if it doesn't exist
     hass.data.setdefault(DOMAIN, {})
 
     room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
-    _LOGGER.info("Setting up Dynamic Presence integration for %s", room_name)
+    _LOGGER.info("Setting up Dynamic Presence for room: %s", room_name)
     _LOGGER.debug("Config entry data: %s", entry.data)
 
-    # Create and set up the controller
-    controller = DynamicPresenceController(hass, entry)
-    setup_success = await controller.async_setup()
+    try:
+        # Create and set up the controller
+        controller = DynamicPresenceController(hass, entry)
+        setup_success = await controller.async_setup()
 
-    if not setup_success:
-        raise ConfigEntryNotReady(f"Failed to set up Dynamic Presence for {room_name}")
+        if not setup_success:
+            _LOGGER.error("Failed to set up Dynamic Presence for %s", room_name)
+            raise ConfigEntryNotReady(
+                f"Failed to set up Dynamic Presence for {room_name}"
+            )
 
-    # Store the controller in hass.data
-    hass.data[DOMAIN][entry.entry_id] = controller
+        # Store the controller in hass.data
+        hass.data[DOMAIN][entry.entry_id] = controller
 
-    # Set up all the platforms for this integration
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Set up all the platforms for this integration
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register an update listener to handle config entry updates
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+        # Register an update listener to handle config entry updates
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
 
-    return True
+        _LOGGER.info("Successfully set up Dynamic Presence for %s", room_name)
+        return True
+
+    except Exception as ex:
+        _LOGGER.exception(
+            "Unexpected error setting up Dynamic Presence for %s: %s", room_name, ex
+        )
+        raise ConfigEntryNotReady(
+            f"Unexpected error setting up Dynamic Presence for {room_name}"
+        ) from ex
+
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for a config entry."""
@@ -62,9 +84,14 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
     if night_mode_changed:
-        _LOGGER.info("Night mode settings have changed, updating controller")
+        _LOGGER.info("Night mode settings have changed for %s", room_name)
 
-    await controller.async_update_config(entry.options)
+    try:
+        await controller.async_update_config(entry.options)
+        _LOGGER.info("Successfully updated options for %s", room_name)
+    except Exception as ex:
+        _LOGGER.error("Failed to update options for %s: %s", room_name, ex)
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
@@ -73,17 +100,30 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     controller = hass.data[DOMAIN][entry.entry_id]
 
-    # Unload platforms first
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    try:
+        # Unload platforms first
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
-    if unload_ok:
-        # Now unload the controller
-        await controller.async_unload()
-        hass.data[DOMAIN].pop(entry.entry_id)
+        if unload_ok:
+            # Now unload the controller
+            await controller.async_unload()
+            hass.data[DOMAIN].pop(entry.entry_id)
+            _LOGGER.info("Successfully unloaded Dynamic Presence for %s", room_name)
+        else:
+            _LOGGER.warning("Failed to unload all platforms for %s", room_name)
 
-    return unload_ok
+        return unload_ok
+
+    except Exception as ex:
+        _LOGGER.exception("Error unloading Dynamic Presence for %s: %s", room_name, ex)
+        return False
+
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload a config entry."""
+    _LOGGER.info(
+        "Reloading Dynamic Presence for %s",
+        entry.data.get(CONF_ROOM_NAME, "Unknown Room"),
+    )
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)

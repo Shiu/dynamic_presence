@@ -1,4 +1,5 @@
 """Switch platform for Dynamic Presence integration."""
+
 import logging
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
@@ -11,58 +12,68 @@ from .entity import DynamicPresenceEntity
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    """Set up the Dynamic Presence switches.
 
-    This function is called when a new config entry is added to set up the switch entities
-    for the Dynamic Presence integration.
-
-    Args:
-        hass: The Home Assistant instance.
-        entry: The config entry for which to set up entities.
-        async_add_entities: Callback to add new entities to Home Assistant.
-
-    """
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up the Dynamic Presence switches."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
+    _LOGGER.info("Setting up Dynamic Presence switches for %s", coordinator.room_name)
+
+    switches = [
         DynamicPresenceSwitch(coordinator, entry),
-        NightModeEnableSwitch(coordinator, entry)
-    ])
+        NightModeEnableSwitch(coordinator, entry),
+    ]
+
+    async_add_entities(switches)
+    _LOGGER.debug(
+        "Added %d Dynamic Presence switches for %s",
+        len(switches),
+        coordinator.room_name,
+    )
+
 
 class DynamicPresenceSwitch(DynamicPresenceEntity, SwitchEntity):
-    """Representation of a Dynamic Presence switch.
-
-    This switch enables or disables the entire Dynamic Presence integration.
-    """
+    """Representation of a Dynamic Presence switch."""
 
     def __init__(self, coordinator, entry: ConfigEntry):
-        """Initialize the switch.
-
-        Args:
-            coordinator: The data update coordinator.
-            entry: The config entry containing integration configuration.
-
-        """
-        super().__init__(coordinator, entry, SwitchEntityDescription(
-            key=CONF_ENABLE,
-            name=f"{entry.data.get('name', 'Dynamic Presence')} Enable",
-            icon="mdi:power",
-        ))
+        """Initialize the switch."""
+        super().__init__(
+            coordinator,
+            entry,
+            SwitchEntityDescription(
+                key=CONF_ENABLE,
+                name=f"{entry.data.get('name', 'Dynamic Presence')} Enable",
+                icon="mdi:power",
+            ),
+        )
+        _LOGGER.debug(
+            "Initialized Dynamic Presence switch for %s", coordinator.room_name
+        )
 
     @property
     def is_on(self) -> bool:
         """Return true if the Dynamic Presence integration is enabled."""
-        return self.coordinator.is_enabled
+        state = self.coordinator.is_enabled
+        _LOGGER.debug(
+            "Dynamic Presence state for %s: %s",
+            self.coordinator.room_name,
+            "Enabled" if state else "Disabled",
+        )
+        return state
 
     async def async_turn_on(self, **kwargs):
         """Enable the Dynamic Presence integration."""
+        _LOGGER.info("Enabling Dynamic Presence for %s", self.coordinator.room_name)
         await self.coordinator.enable()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         """Disable the Dynamic Presence integration."""
+        _LOGGER.info("Disabling Dynamic Presence for %s", self.coordinator.room_name)
         await self.coordinator.disable()
         self.async_write_ha_state()
+
 
 class NightModeEnableSwitch(DynamicPresenceEntity, SwitchEntity):
     """Representation of a Night Mode Enable switch.
@@ -71,30 +82,37 @@ class NightModeEnableSwitch(DynamicPresenceEntity, SwitchEntity):
     """
 
     def __init__(self, coordinator, entry: ConfigEntry):
-        """Initialize the Night Mode Enable switch.
-
-        Args:
-            coordinator: The data update coordinator.
-            entry: The config entry containing integration configuration.
-
-        """
-        super().__init__(coordinator, entry, SwitchEntityDescription(
-            key=CONF_NIGHT_MODE_ENABLE,
-            name="Night Mode Enable",
-            icon="mdi:weather-night",
-        ))
+        """Initialize the Night Mode Enable switch."""
+        super().__init__(
+            coordinator,
+            entry,
+            SwitchEntityDescription(
+                key=CONF_NIGHT_MODE_ENABLE,
+                name="Night Mode Enable",
+                icon="mdi:weather-night",
+            ),
+        )
+        _LOGGER.debug("Initialized Night Mode switch for %s", coordinator.room_name)
 
     @property
     def is_on(self) -> bool:
         """Return true if Night Mode is enabled."""
-        return self.coordinator.is_night_mode_enabled
+        state = self.coordinator.is_night_mode_enabled
+        _LOGGER.debug(
+            "Night Mode state for %s: %s",
+            self.coordinator.room_name,
+            "Enabled" if state else "Disabled",
+        )
+        return state
 
     async def async_turn_on(self, **kwargs):
         """Enable Night Mode."""
+        _LOGGER.info("Enabling Night Mode for %s", self.coordinator.room_name)
         await self.coordinator.enable_night_mode()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         """Disable Night Mode."""
+        _LOGGER.info("Disabling Night Mode for %s", self.coordinator.room_name)
         await self.coordinator.disable_night_mode()
         self.async_write_ha_state()

@@ -20,75 +20,71 @@ from .entity import DynamicPresenceEntity
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
-    """Representation of a Dynamic Presence time setting.
+    """Representation of a Dynamic Presence time setting."""
 
-    This class extends DynamicPresenceEntity and TimeEntity to provide
-    functionality for time-based settings in the Dynamic Presence integration.
-    """
-
-    def __init__(self, coordinator, config_entry: ConfigEntry, description: TimeEntityDescription):
-        """Initialize the Dynamic Presence time entity.
-
-        Args:
-            coordinator: The data update coordinator.
-            config_entry: The config entry containing integration configuration.
-            description: TimeEntityDescription object with entity metadata.
-
-        """
+    def __init__(
+        self, coordinator, config_entry: ConfigEntry, description: TimeEntityDescription
+    ):
+        """Initialize the Dynamic Presence time entity."""
         super().__init__(coordinator, config_entry, description)
         self._key = description.key
+        _LOGGER.debug(
+            "Initialized %s time entity for %s", self._key, coordinator.room_name
+        )
 
     @property
     def native_value(self) -> time:
-        """Get the current time value for the entity.
-
-        Returns:
-            A time object representing the current value, or None if not set.
-
-        """
+        """Get the current time value for the entity."""
         time_str = self._get_coordinator_value(
             self._key,
-            DEFAULT_NIGHT_MODE_START if self._key == CONF_NIGHT_MODE_START else DEFAULT_NIGHT_MODE_END
+            DEFAULT_NIGHT_MODE_START
+            if self._key == CONF_NIGHT_MODE_START
+            else DEFAULT_NIGHT_MODE_END,
         )
         if time_str:
-            hour, minute = map(int, time_str.split(':'))
+            hour, minute = map(int, time_str.split(":"))
+            _LOGGER.debug("Retrieved time value for %s: %s", self._key, time_str)
             return time(hour, minute)
+        _LOGGER.warning("No time value found for %s, using None", self._key)
         return None
 
     async def async_set_value(self, value: time) -> None:
-        """Set a new time value for the entity.
-
-        Args:
-        value: The new time value to set.
-
-        """
+        """Set a new time value for the entity."""
         time_str = value.strftime("%H:%M")
+        _LOGGER.info("Setting new time value for %s: %s", self._key, time_str)
         await self.coordinator.async_update_config({self._key: time_str})
         self.async_write_ha_state()
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    """Set up Dynamic Presence time entities based on a config entry.
 
-    This function is called when a new config entry is added to set up the time entities
-    for the Dynamic Presence integration.
-
-    Args:
-        hass: The Home Assistant instance.
-        entry: The config entry for which to set up entities.
-        async_add_entities: Callback to add new entities to Home Assistant.
-
-    """
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up Dynamic Presence time entities based on a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
-        DynamicPresenceTime(coordinator, entry, TimeEntityDescription(
-            key=CONF_NIGHT_MODE_START,
-            name="Night Mode Start",
-            icon="mdi:clock-start",
-        )),
-        DynamicPresenceTime(coordinator, entry, TimeEntityDescription(
-            key=CONF_NIGHT_MODE_END,
-            name="Night Mode End",
-            icon="mdi:clock-end",
-        )),
-    ])
+    _LOGGER.info("Setting up time entities for %s", coordinator.room_name)
+
+    entities = [
+        DynamicPresenceTime(
+            coordinator,
+            entry,
+            TimeEntityDescription(
+                key=CONF_NIGHT_MODE_START,
+                name="Night Mode Start",
+                icon="mdi:clock-start",
+            ),
+        ),
+        DynamicPresenceTime(
+            coordinator,
+            entry,
+            TimeEntityDescription(
+                key=CONF_NIGHT_MODE_END,
+                name="Night Mode End",
+                icon="mdi:clock-end",
+            ),
+        ),
+    ]
+
+    async_add_entities(entities)
+    _LOGGER.debug("Added %d time entities for %s", len(entities), coordinator.room_name)
