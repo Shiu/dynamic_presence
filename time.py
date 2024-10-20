@@ -16,7 +16,7 @@ from .const import (
     DEFAULT_NIGHT_MODE_START,
     DOMAIN,
 )
-from .entity import DynamicPresenceEntity
+from .entity import DynamicPresenceEntity, set_entity_properties
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,9 +30,14 @@ class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
     ) -> None:
         """Initialize the Dynamic Presence time entity."""
         super().__init__(coordinator, config_entry, description)
-        self._key = description.key
+        self._attr_unique_id, name, entity_id = set_entity_properties(
+            coordinator, description
+        )
+        if name is not None:
+            self._attr_name = name
+        self.entity_id = f"{DOMAIN}.{entity_id}"
         _LOGGER.debug(
-            "Initialized %s time entity for %s", self._key, coordinator.room_name
+            "Initialized %s time entity for %s", description.key, coordinator.room_name
         )
 
     @property
@@ -42,17 +47,14 @@ class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
             if self.coordinator is None:
                 _LOGGER.error("Coordinator is None for %s", self.entity_id)
                 return None
-            if self.coordinator.data is None:
-                _LOGGER.error("Coordinator data is None for %s", self.entity_id)
-                return None
-            time_str = self._get_coordinator_value(
-                self._key,
+            value = self.coordinator.data.get(
+                self.entity_description.key,
                 DEFAULT_NIGHT_MODE_START
-                if self._key == CONF_NIGHT_MODE_START
+                if self.entity_description.key == CONF_NIGHT_MODE_START
                 else DEFAULT_NIGHT_MODE_END,
             )
-            _LOGGER.debug("Time string for %s: %s", self.entity_id, time_str)
-            return datetime.strptime(time_str, "%H:%M").time() if time_str else None
+            _LOGGER.debug("Value for %s: %s", self.entity_id, value)
+            return datetime.strptime(value, "%H:%M").time()
         except Exception:
             _LOGGER.exception("Error getting native value for %s", self.entity_id)
             return None

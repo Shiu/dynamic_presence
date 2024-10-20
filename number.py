@@ -6,7 +6,7 @@ from homeassistant.components.number import NumberEntity, NumberEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, UpdateFailed
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
@@ -18,12 +18,13 @@ from .const import (
     NUMBER_CONFIG,
 )
 from .controller import DynamicPresenceController
+from .entity import DynamicPresenceEntity, set_entity_properties
 
 _LOGGER = logging.getLogger(__name__)
 
 
 # pylint: disable=abstract-method
-class DynamicPresenceNumber(CoordinatorEntity, NumberEntity):
+class DynamicPresenceNumber(DynamicPresenceEntity, NumberEntity):
     """Representation of a Dynamic Presence number setting."""
 
     def __init__(
@@ -32,10 +33,13 @@ class DynamicPresenceNumber(CoordinatorEntity, NumberEntity):
         description: NumberEntityDescription,
     ) -> None:
         """Initialize the Dynamic Presence number entity."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
-        self._attr_name = description.name
+        super().__init__(coordinator, coordinator.config_entry, description)
+        self._attr_unique_id, name, entity_id = set_entity_properties(
+            coordinator, description
+        )
+        if name is not None:
+            self._attr_name = name
+        self.entity_id = f"{DOMAIN}.{entity_id}"
 
     @property
     def native_value(self) -> float | None:

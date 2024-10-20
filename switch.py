@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_ENABLE, CONF_NIGHT_MODE_ENABLE, DOMAIN
-from .entity import DynamicPresenceEntity
+from .entity import DynamicPresenceEntity, set_entity_properties
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the Dynamic Presence switches."""
+    """Set up Dynamic Presence switch based on a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.info("Setting up Dynamic Presence switches for %s", coordinator.room_name)
 
@@ -24,8 +24,24 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     switches = [
-        DynamicPresenceSwitch(coordinator, entry),
-        NightModeEnableSwitch(coordinator, entry),
+        DynamicPresenceSwitch(
+            coordinator,
+            entry,
+            SwitchEntityDescription(
+                key=CONF_ENABLE,
+                name="Dynamic Presence Enable",
+                icon="mdi:power",
+            ),
+        ),
+        DynamicPresenceSwitch(
+            coordinator,
+            entry,
+            SwitchEntityDescription(
+                key=CONF_NIGHT_MODE_ENABLE,
+                name="Night Mode Enable",
+                icon="mdi:weather-night",
+            ),
+        ),
     ]
 
     async_add_entities(switches)
@@ -40,17 +56,17 @@ async def async_setup_entry(
 class DynamicPresenceSwitch(DynamicPresenceEntity, SwitchEntity):
     """Representation of a Dynamic Presence switch."""
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator, entry: ConfigEntry, description: SwitchEntityDescription
+    ) -> None:
         """Initialize the switch."""
-        super().__init__(
-            coordinator,
-            entry,
-            SwitchEntityDescription(
-                key=CONF_ENABLE,
-                name=f"{entry.data.get('name', 'Dynamic Presence')} Enable",
-                icon="mdi:power",
-            ),
+        super().__init__(coordinator, entry, description)
+        self._attr_unique_id, name, entity_id = set_entity_properties(
+            coordinator, description
         )
+        if name is not None:
+            self._attr_name = name
+        self.entity_id = f"{DOMAIN}.{entity_id}"
         _LOGGER.debug(
             "Initialized Dynamic Presence switch for %s", coordinator.room_name
         )

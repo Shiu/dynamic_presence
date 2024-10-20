@@ -6,7 +6,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import Entity, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, NAME, VERSION
@@ -93,3 +93,11 @@ class DynamicPresenceEntity(CoordinatorEntity, Entity):
             "Getting coordinator value for %s: %s = %s", self.entity_id, key, value
         )
         return value
+
+
+def set_entity_properties(coordinator, description: EntityDescription):
+    """Set common properties for entities."""
+    unique_id = f"dynamic_presence_{coordinator.room_name}_{description.key}"
+    entity_id = f"dynamic_presence_{coordinator.room_name}_{description.key}"
+
+    return unique_id, None, entity_id

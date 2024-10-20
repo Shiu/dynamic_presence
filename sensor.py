@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .entity import DynamicPresenceEntity
+from .entity import DynamicPresenceEntity, set_entity_properties
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,9 +59,12 @@ class DynamicPresenceSensor(DynamicPresenceEntity, SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, config_entry, description)
-        _LOGGER.debug(
-            "Initialized %s sensor for %s", description.name, coordinator.room_name
+        self._attr_unique_id, name, entity_id = set_entity_properties(
+            coordinator, description
         )
+        if name is not None:
+            self._attr_name = name
+        self.entity_id = f"{DOMAIN}.{entity_id}"
 
 
 class PresenceDurationSensor(DynamicPresenceSensor):
