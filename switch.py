@@ -20,6 +20,9 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.info("Setting up Dynamic Presence switches for %s", coordinator.room_name)
 
+    # Wait for the coordinator to complete its first update
+    await coordinator.async_config_entry_first_refresh()
+
     switches = [
         DynamicPresenceSwitch(coordinator, entry),
         NightModeEnableSwitch(coordinator, entry),
@@ -33,10 +36,11 @@ async def async_setup_entry(
     )
 
 
+# pylint: disable=abstract-method
 class DynamicPresenceSwitch(DynamicPresenceEntity, SwitchEntity):
     """Representation of a Dynamic Presence switch."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the switch."""
         super().__init__(
             coordinator,
@@ -81,7 +85,7 @@ class NightModeEnableSwitch(DynamicPresenceEntity, SwitchEntity):
     This switch enables or disables the Night Mode feature of the Dynamic Presence integration.
     """
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Night Mode Enable switch."""
         super().__init__(
             coordinator,

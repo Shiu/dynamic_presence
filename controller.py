@@ -1,37 +1,40 @@
 """Controller for Dynamic Presence integration."""
 
+from collections.abc import Callable
 from datetime import timedelta
 import logging
-from typing import Any, Callable, Dict
+from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_state_change_event,
 )
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_ACTIVE_ROOM_TIMEOUT,
+    CONF_CONTROLLED_ENTITIES,
+    CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
+    CONF_NIGHT_MODE_ENABLE,
     CONF_NIGHT_MODE_END,
+    CONF_NIGHT_MODE_ENTITIES_BEHAVIOR,
+    CONF_NIGHT_MODE_SCALE,
     CONF_NIGHT_MODE_START,
     CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_TIMEOUT,
     CONF_ROOM_NAME,
+    DEFAULT_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
     DOMAIN,
     NUMBER_CONFIG,
-    DEFAULT_NIGHT_MODE_START,
-    DEFAULT_NIGHT_MODE_END,
-    CONF_CONTROLLED_ENTITIES,
-    CONF_NIGHT_MODE_ENABLE,
-    CONF_NIGHT_MODE_SCALE,
-    CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
-    CONF_NIGHT_MODE_ENTITIES_BEHAVIOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 class DynamicPresenceController(DataUpdateCoordinator):
     """Controller class for Dynamic Presence integration."""
 
-    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry):
+    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
         """Initialize the Dynamic Presence controller."""
         super().__init__(
             hass,
@@ -60,12 +63,14 @@ class DynamicPresenceController(DataUpdateCoordinator):
         self.last_presence_end_time: dt_util.dt.datetime | None = None
         self.presence_sensor = config_entry.data["presence_sensor"]
         self.controlled_entities = config_entry.data.get(CONF_CONTROLLED_ENTITIES, [])
+        self.night_mode_enable = config_entry.data.get(CONF_NIGHT_MODE_ENABLE, False)
 
         self._load_config_values()
+        self._remove_state_listener = None
 
     def _load_config_values(self) -> None:
-        """
-        Load configuration values from the config entry.
+        """Load configuration values from the config entry.
+
         This method uses the _validate_config method to ensure all values are valid.
         """
         options = self._validate_config(self.config_entry.options)
@@ -87,7 +92,9 @@ class DynamicPresenceController(DataUpdateCoordinator):
             CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
         )
         self.night_mode_end = options.get(CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END)
-        self.night_mode_enable = options.get(CONF_NIGHT_MODE_ENABLE, False)
+        self.night_mode_enable = options.get(
+            CONF_NIGHT_MODE_ENABLE, self.night_mode_enable
+        )
         self.night_mode_scale = options.get(
             CONF_NIGHT_MODE_SCALE, NUMBER_CONFIG[CONF_NIGHT_MODE_SCALE]["default"]
         )
@@ -99,7 +106,10 @@ class DynamicPresenceController(DataUpdateCoordinator):
         )
 
         _LOGGER.debug(
-            "Loaded config values: presence_timeout=%s, active_room_threshold=%s, active_room_timeout=%s, night_mode_timeout=%s, night_mode_start=%s, night_mode_end=%s, night_mode_enable=%s, night_mode_scale=%s, night_mode_controlled_entities=%s, night_mode_entities_behavior=%s",
+            "Loaded config values: presence_timeout=%s, active_room_threshold=%s, "
+            "active_room_timeout=%s, night_mode_timeout=%s, night_mode_start=%s, "
+            "night_mode_end=%s, night_mode_enable=%s, night_mode_scale=%s, "
+            "night_mode_controlled_entities=%s, night_mode_entities_behavior=%s",
             self.presence_timeout,
             self.active_room_threshold,
             self.active_room_timeout,
@@ -112,7 +122,6 @@ class DynamicPresenceController(DataUpdateCoordinator):
             self.night_mode_entities_behavior,
         )
 
-    # Properties
     @property
     def is_enabled(self) -> bool:
         """Return whether the controller is enabled."""
@@ -123,36 +132,44 @@ class DynamicPresenceController(DataUpdateCoordinator):
         """Return whether night mode is enabled."""
         return self.night_mode_enable
 
-    # Setup and teardown methods
     async def async_setup(self) -> bool:
-        """
-        Set up the controller.
-        This method is called when the integration is being set up.
-        It sets up the state change listener for the presence sensor.
-        """
+        """Set up the controller."""
         _LOGGER.info("Setting up DynamicPresenceController for %s", self.room_name)
-        try:
-            if self._enabled:
-                self._remove_state_listener = async_track_state_change_event(
-                    self.hass, [self.presence_sensor], self.handle_presence_change
-                )
-                _LOGGER.info(
-                    "Set up state change listener for %s", self.presence_sensor
-                )
-                _LOGGER.debug("Controlled entities: %s", self.controlled_entities)
+        if not self._enabled:
+            _LOGGER.info("Controller is disabled, skipping setup")
             return True
-        except Exception as e:
-            _LOGGER.error("Error setting up Dynamic Presence Controller: %s", str(e))
+
+        try:
+            _LOGGER.debug("Controller is enabled, setting up state change listener")
+            self._remove_state_listener = async_track_state_change_event(
+                self.hass, [self.presence_sensor], self.handle_presence_change
+            )
+            _LOGGER.info("Set up state change listener for %s", self.presence_sensor)
+            _LOGGER.debug("Controlled entities: %s", self.controlled_entities)
+            _LOGGER.debug(
+                "Night mode controlled entities: %s",
+                self.night_mode_controlled_entities,
+            )
+            _LOGGER.debug(
+                "Night mode settings: enabled=%s, start=%s, end=%s, scale=%s",
+                self.night_mode_enable,
+                self.night_mode_start,
+                self.night_mode_end,
+                self.night_mode_scale,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Error setting up Dynamic Presence Controller for %s",
+                self.room_name,
+            )
             return False
+        else:
+            return True
 
     async def async_unload(self) -> None:
-        """
-        Unload the Dynamic Presence Controller.
-        This method is called when the integration is being unloaded.
-        It removes all listeners and cancels all timers.
-        """
+        """Unload the Dynamic Presence Controller."""
         try:
-            if hasattr(self, "_remove_state_listener"):
+            if self._remove_state_listener:
                 self._remove_state_listener()
 
             for timer in self._timers.values():
@@ -164,20 +181,17 @@ class DynamicPresenceController(DataUpdateCoordinator):
             self._listeners.clear()
 
             _LOGGER.info("Unloaded Dynamic Presence Controller")
-        except Exception as e:
+        except HomeAssistantError as e:
             _LOGGER.error("Error unloading Dynamic Presence Controller: %s", str(e))
 
     async def async_added_to_hass(self) -> None:
-        """
-        Called when entity is added to hass.
-        This method restores the last known state of the controller.
-        """
+        """Add entity to Home Assistant."""
         await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if state:
-            self.presence_detected = state.state == STATE_ON
-            self.is_active_room = state.attributes.get("is_active_room", False)
-            last_changed = state.last_changed
+        last_state = await RestoreEntity.async_get_last_state(self.hass, self.entity_id)
+        if last_state:
+            self.presence_detected = last_state.state == STATE_ON
+            self.is_active_room = last_state.attributes.get("is_active_room", False)
+            last_changed = last_state.last_changed
             if self.presence_detected:
                 self.presence_start_time = last_changed
             else:
@@ -193,13 +207,9 @@ class DynamicPresenceController(DataUpdateCoordinator):
 
         self._dispatch_update()
 
-    # Presence handling methods
     @callback
     def handle_presence_change(self, event: Event) -> None:
-        """
-        Handle changes to the presence sensor state.
-        This method is called whenever the state of the presence sensor changes.
-        """
+        """Handle changes to the presence sensor state."""
         new_state = event.data.get("new_state")
         if new_state is None:
             _LOGGER.warning(
@@ -221,11 +231,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
             self.hass.async_create_task(self.handle_presence_clear())
 
     async def handle_presence_detected(self) -> None:
-        """
-        Handle presence detection.
-        This method is called when presence is detected in the room.
-        It turns on controlled entities and starts the active room timer.
-        """
+        """Handle presence detection."""
         try:
             _LOGGER.debug("Handling presence detection for %s", self.room_name)
             self.cancel_timer("presence")
@@ -237,22 +243,18 @@ class DynamicPresenceController(DataUpdateCoordinator):
                     "Starting active room timer for %s seconds",
                     self.active_room_threshold,
                 )
-                self.start_timer("active_room")
+                self.start_timer("active_room", self.active_room_threshold)
 
             self.presence_detected = True
             self.update_active_room_status()
             self._dispatch_update()
-        except Exception as e:
+        except HomeAssistantError as e:
             _LOGGER.error(
                 "Error handling presence detection for %s: %s", self.room_name, str(e)
             )
 
     async def handle_presence_clear(self) -> None:
-        """
-        Handle presence clearing.
-        This method is called when presence is no longer detected in the room.
-        It starts the presence timer to turn off entities after a delay.
-        """
+        """Handle presence clearing."""
         try:
             _LOGGER.debug("Handling presence clear for %s", self.room_name)
             self.cancel_timer("active_room")
@@ -263,19 +265,19 @@ class DynamicPresenceController(DataUpdateCoordinator):
             )
             timeout = self.get_adjusted_timeout(base_timeout)
             _LOGGER.debug("Starting presence timer for %s seconds", timeout)
-            self.start_timer("presence")
+            self.start_timer("presence", timeout)
             self.presence_start_time = None
             self.last_presence_end_time = dt_util.utcnow()
             self.presence_detected = False
             self.update_active_room_status()
             self._dispatch_update()
-        except Exception as e:
+        except HomeAssistantError as e:
             _LOGGER.error(
                 "Error handling presence clear for %s: %s", self.room_name, str(e)
             )
 
-    # Timer methods
     def get_adjusted_timeout(self, timeout: int) -> int:
+        """Adjust the timeout based on night mode settings."""
         if self.is_night_mode_active():
             adjusted_timeout = int(timeout * self.night_mode_scale)
             _LOGGER.debug(
@@ -288,14 +290,11 @@ class DynamicPresenceController(DataUpdateCoordinator):
             return adjusted_timeout
         return timeout
 
-    def start_timer(self, timer_name: str) -> None:
-        """
-        Start a timer.
-        This method starts either the presence timer or the active room timer.
-        """
+    def start_timer(self, timer_name: str, timeout: int) -> None:
+        """Start a timer."""
         self.cancel_timer(timer_name)
         if timer_name == "presence":
-            timeout = self.get_adjusted_timeout(self.presence_timeout)
+            timeout = self.get_adjusted_timeout(timeout)
         elif timer_name == "active_room":
             timeout = self.get_adjusted_timeout(self.active_room_threshold)
         else:
@@ -318,10 +317,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
             _LOGGER.debug("Cancelled %s timer for %s", timer_name, self.room_name)
 
     async def timer_expired(self, _now: dt_util.dt.datetime) -> None:
-        """
-        Handle timer expiration.
-        This method is called when either the presence timer or active room timer expires.
-        """
+        """Handle timer expiration."""
         if "presence" in self._timers:
             await self.turn_off_controlled_entities()
             self.presence_detected = False
@@ -331,12 +327,8 @@ class DynamicPresenceController(DataUpdateCoordinator):
 
         self._dispatch_update()
 
-    # Entity control methods
     async def turn_on_controlled_entities(self):
-        """
-        Turn on controlled entities based on current mode.
-        This method turns on the appropriate entities when presence is detected.
-        """
+        """Turn on controlled entities based on current mode."""
         _LOGGER.info("Turning on controlled entities for %s", self.room_name)
         entities_to_turn_on = self.get_active_entities()
         for entity_id in entities_to_turn_on:
@@ -348,10 +340,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
             await self.hass.services.async_call(domain, service, service_data)
 
     async def turn_off_controlled_entities(self):
-        """
-        Turn off all controlled entities.
-        This method turns off all entities when presence is no longer detected.
-        """
+        """Turn off all controlled entities."""
         _LOGGER.info("Turning off controlled entities for %s", self.room_name)
         all_entities = list(
             set(self.controlled_entities + self.night_mode_controlled_entities)
@@ -365,26 +354,17 @@ class DynamicPresenceController(DataUpdateCoordinator):
             )
 
     def get_active_entities(self):
-        """
-        Get the list of entities to control based on current mode.
-        This method returns different sets of entities depending on whether night mode is active.
-        """
+        """Get the list of entities to control based on current mode."""
         if self.is_night_mode_active():
             if self.night_mode_entities_behavior == "exclusive":
                 return self.night_mode_controlled_entities
-            else:  # additive
-                return list(
-                    set(self.controlled_entities + self.night_mode_controlled_entities)
-                )
-        else:
-            return self.controlled_entities
+            return list(
+                set(self.controlled_entities + self.night_mode_controlled_entities)
+            )
+        return self.controlled_entities
 
-    # Status update methods
     def update_active_room_status(self):
-        """
-        Update the active room status based on presence duration.
-        A room becomes 'active' if presence is continuously detected for a certain duration.
-        """
+        """Update the active room status based on presence duration."""
         if self.presence_detected and self.presence_start_time:
             presence_duration = (
                 dt_util.utcnow() - self.presence_start_time
@@ -406,16 +386,27 @@ class DynamicPresenceController(DataUpdateCoordinator):
         return 0
 
     def is_night_mode_active(self) -> bool:
+        """Check if night mode is currently active."""
         current_time = dt_util.now().time()
-        start_time = self.night_mode_start
-        end_time = self.night_mode_end
+        start_time = dt_util.parse_time(self.night_mode_start)
+        end_time = dt_util.parse_time(self.night_mode_end)
+
+        if start_time is None or end_time is None:
+            _LOGGER.error(
+                "Invalid night mode times: start=%s, end=%s",
+                self.night_mode_start,
+                self.night_mode_end,
+            )
+            return False
+
         is_active = (
-            (start_time <= current_time or current_time < end_time)
-            if start_time > end_time
-            else (start_time <= current_time < end_time)
+            (start_time <= current_time < end_time)
+            if start_time < end_time
+            else (start_time <= current_time or current_time < end_time)
         )
         _LOGGER.debug(
-            "Night mode active check for %s: current_time=%s, start_time=%s, end_time=%s, is_active=%s",
+            "Night mode active check for %s: current_time=%s, start_time=%s, "
+            "end_time=%s, is_active=%s",
             self.room_name,
             current_time,
             start_time,
@@ -436,7 +427,6 @@ class DynamicPresenceController(DataUpdateCoordinator):
         await self.async_update_config({CONF_NIGHT_MODE_ENABLE: False})
         self._dispatch_update()
 
-    # Controller enable/disable methods
     async def enable(self):
         """Enable the Dynamic Presence Controller."""
         self._enabled = True
@@ -450,7 +440,6 @@ class DynamicPresenceController(DataUpdateCoordinator):
         await self.turn_off_controlled_entities()
         self._dispatch_update()
 
-    # Update methods
     def _dispatch_update(self) -> None:
         """Dispatch update to all entities."""
         async_dispatcher_send(
@@ -458,10 +447,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """
-        Fetch new state data for the sensor.
-        This method is called regularly to update the state of the integration.
-        """
+        """Fetch new state data for the sensor."""
         self.update_active_room_status()
         return {
             "presence_detected": self.presence_detected,
@@ -482,11 +468,8 @@ class DynamicPresenceController(DataUpdateCoordinator):
             "night_mode_entities_behavior": self.night_mode_entities_behavior,
         }
 
-    async def async_update_config(self, new_data: Dict[str, Any]) -> None:
-        """
-        Update the controller configuration.
-        This method is called when the user updates the integration's configuration.
-        """
+    async def async_update_config(self, new_data: dict[str, Any]) -> None:
+        """Update the controller configuration."""
         _LOGGER.info("Updating configuration for %s", self.room_name)
         _LOGGER.debug("New configuration data for %s: %s", self.room_name, new_data)
         try:
@@ -497,25 +480,20 @@ class DynamicPresenceController(DataUpdateCoordinator):
                 self.config_entry, options=self.config_entry.options
             )
             self._dispatch_update()
-            await self.async_request_refresh()
+            await self.async_update_ha_state()
             _LOGGER.info("Successfully updated Dynamic Presence configuration")
-        except Exception as e:
+        except (ValueError, HomeAssistantError) as e:
             _LOGGER.error("Error updating Dynamic Presence configuration: %s", str(e))
 
-    def _validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate configuration values.
-        This method checks if the provided configuration values are valid and within expected ranges.
-        If a value is invalid, it's replaced with the default value and a warning is logged.
-        """
+    def _validate_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Validate configuration values."""
         validated = {}
 
-        # Validate presence_timeout
         presence_timeout = config.get(CONF_PRESENCE_TIMEOUT)
         if presence_timeout is not None:
             if not isinstance(presence_timeout, (int, float)) or presence_timeout <= 0:
                 _LOGGER.warning(
-                    "Invalid %s: %s. Using default.",
+                    "Invalid %s: %s. Using default",
                     NUMBER_CONFIG[CONF_PRESENCE_TIMEOUT]["name"],
                     presence_timeout,
                 )
@@ -525,7 +503,6 @@ class DynamicPresenceController(DataUpdateCoordinator):
             else:
                 validated[CONF_PRESENCE_TIMEOUT] = presence_timeout
 
-        # Validate active_room_threshold
         active_room_threshold = config.get(CONF_ACTIVE_ROOM_THRESHOLD)
         if active_room_threshold is not None:
             if (
@@ -533,7 +510,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
                 or active_room_threshold <= 0
             ):
                 _LOGGER.warning(
-                    "Invalid %s: %s. Using default.",
+                    "Invalid %s: %s. Using default",
                     NUMBER_CONFIG[CONF_ACTIVE_ROOM_THRESHOLD]["name"],
                     active_room_threshold,
                 )
@@ -543,9 +520,6 @@ class DynamicPresenceController(DataUpdateCoordinator):
             else:
                 validated[CONF_ACTIVE_ROOM_THRESHOLD] = active_room_threshold
 
-        # Add similar validations for other configuration values...
-
-        # Validate night_mode_scale
         night_mode_scale = config.get(CONF_NIGHT_MODE_SCALE)
         if night_mode_scale is not None:
             if (
@@ -554,7 +528,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
                 or night_mode_scale > 1
             ):
                 _LOGGER.warning(
-                    "Invalid %s: %s. Using default.",
+                    "Invalid %s: %s. Using default",
                     NUMBER_CONFIG[CONF_NIGHT_MODE_SCALE]["name"],
                     night_mode_scale,
                 )
@@ -565,3 +539,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
                 validated[CONF_NIGHT_MODE_SCALE] = night_mode_scale
 
         return validated
+
+    async def async_update_ha_state(self):
+        """Update Home Assistant with current state."""
+        self.async_write_ha_state()

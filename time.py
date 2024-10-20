@@ -1,7 +1,7 @@
 """Time platform for Dynamic Presence integration."""
 # type: ignore[name-shadowing]
 
-from datetime import time
+from datetime import datetime, time
 import logging
 
 from homeassistant.components.time import TimeEntity, TimeEntityDescription
@@ -21,12 +21,13 @@ from .entity import DynamicPresenceEntity
 _LOGGER = logging.getLogger(__name__)
 
 
+# pylint: disable=abstract-method
 class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
     """Representation of a Dynamic Presence time setting."""
 
     def __init__(
         self, coordinator, config_entry: ConfigEntry, description: TimeEntityDescription
-    ):
+    ) -> None:
         """Initialize the Dynamic Presence time entity."""
         super().__init__(coordinator, config_entry, description)
         self._key = description.key
@@ -35,20 +36,26 @@ class DynamicPresenceTime(DynamicPresenceEntity, TimeEntity):
         )
 
     @property
-    def native_value(self) -> time:
-        """Get the current time value for the entity."""
-        time_str = self._get_coordinator_value(
-            self._key,
-            DEFAULT_NIGHT_MODE_START
-            if self._key == CONF_NIGHT_MODE_START
-            else DEFAULT_NIGHT_MODE_END,
-        )
-        if time_str:
-            hour, minute = map(int, time_str.split(":"))
-            _LOGGER.debug("Retrieved time value for %s: %s", self._key, time_str)
-            return time(hour, minute)
-        _LOGGER.warning("No time value found for %s, using None", self._key)
-        return None
+    def native_value(self) -> time | None:
+        """Return the native value of the time entity."""
+        try:
+            if self.coordinator is None:
+                _LOGGER.error("Coordinator is None for %s", self.entity_id)
+                return None
+            if self.coordinator.data is None:
+                _LOGGER.error("Coordinator data is None for %s", self.entity_id)
+                return None
+            time_str = self._get_coordinator_value(
+                self._key,
+                DEFAULT_NIGHT_MODE_START
+                if self._key == CONF_NIGHT_MODE_START
+                else DEFAULT_NIGHT_MODE_END,
+            )
+            _LOGGER.debug("Time string for %s: %s", self.entity_id, time_str)
+            return datetime.strptime(time_str, "%H:%M").time() if time_str else None
+        except Exception:
+            _LOGGER.exception("Error getting native value for %s", self.entity_id)
+            return None
 
     async def async_set_value(self, value: time) -> None:
         """Set a new time value for the entity."""
@@ -64,6 +71,9 @@ async def async_setup_entry(
     """Set up Dynamic Presence time entities based on a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.info("Setting up time entities for %s", coordinator.room_name)
+
+    # Wait for the coordinator to complete its first update
+    await coordinator.async_config_entry_first_refresh()
 
     entities = [
         DynamicPresenceTime(

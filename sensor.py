@@ -1,6 +1,9 @@
-"""Sensor platform for Dynamic Presence integration."""
+"""Sensor platform for Dynamic Presence."""
+
+from __future__ import annotations
 
 import logging
+
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -16,14 +19,16 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """
-    Set up the Dynamic Presence sensor entities.
+    """Set up the Dynamic Presence sensor entities.
 
     This function is called when a new config entry is added. It creates and adds
     all the sensor entities for the Dynamic Presence integration.
     """
     coordinator = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.info("Setting up Dynamic Presence sensors for %s", coordinator.room_name)
+
+    # Wait for the coordinator to complete its first update
+    await coordinator.async_config_entry_first_refresh()
 
     sensors = [
         PresenceDurationSensor(coordinator, entry),
@@ -40,8 +45,7 @@ async def async_setup_entry(
 
 
 class DynamicPresenceSensor(DynamicPresenceEntity, SensorEntity):
-    """
-    Base class for Dynamic Presence sensors.
+    """Base class for Dynamic Presence sensors.
 
     This class extends DynamicPresenceEntity and SensorEntity to provide
     common functionality for all Dynamic Presence sensors.
@@ -52,7 +56,7 @@ class DynamicPresenceSensor(DynamicPresenceEntity, SensorEntity):
         coordinator,
         config_entry: ConfigEntry,
         description: SensorEntityDescription,
-    ):
+    ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, config_entry, description)
         _LOGGER.debug(
@@ -63,7 +67,7 @@ class DynamicPresenceSensor(DynamicPresenceEntity, SensorEntity):
 class PresenceDurationSensor(DynamicPresenceSensor):
     """Representation of a Presence Duration sensor."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Presence Duration sensor."""
         super().__init__(
             coordinator,
@@ -78,8 +82,7 @@ class PresenceDurationSensor(DynamicPresenceSensor):
 
     @property
     def native_value(self) -> int:
-        """
-        Return the current presence duration in seconds.
+        """Return the current presence duration in seconds.
 
         Calculates the time difference between now and when presence was first detected.
         """
@@ -101,7 +104,7 @@ class PresenceDurationSensor(DynamicPresenceSensor):
 class AbsenceDurationSensor(DynamicPresenceSensor):
     """Representation of an Absence Duration sensor."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Absence Duration sensor."""
         super().__init__(
             coordinator,
@@ -116,8 +119,7 @@ class AbsenceDurationSensor(DynamicPresenceSensor):
 
     @property
     def native_value(self) -> int:
-        """
-        Return the current absence duration in seconds.
+        """Return the current absence duration in seconds.
 
         Calculates the time difference between now and when presence was last detected.
         """
@@ -142,7 +144,7 @@ class AbsenceDurationSensor(DynamicPresenceSensor):
 class ActiveRoomStatusSensor(DynamicPresenceSensor):
     """Representation of an Active Room Status sensor."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Active Room Status sensor."""
         super().__init__(
             coordinator,
@@ -156,8 +158,7 @@ class ActiveRoomStatusSensor(DynamicPresenceSensor):
 
     @property
     def native_value(self) -> str:
-        """
-        Return the current active room status.
+        """Return the current active room status.
 
         Returns "Active" if the room is currently active, "Inactive" otherwise.
         """
@@ -171,7 +172,7 @@ class ActiveRoomStatusSensor(DynamicPresenceSensor):
 class PresenceSensorStateSensor(DynamicPresenceSensor):
     """Representation of a Presence Sensor State sensor."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Presence Sensor State sensor."""
         super().__init__(
             coordinator,
@@ -185,8 +186,7 @@ class PresenceSensorStateSensor(DynamicPresenceSensor):
 
     @property
     def native_value(self) -> str:
-        """
-        Return the current state of the presence sensor.
+        """Return the current state of the presence sensor.
 
         Returns "Detected" if presence is currently detected, "Clear" otherwise.
         """
@@ -200,7 +200,7 @@ class PresenceSensorStateSensor(DynamicPresenceSensor):
 class NightModeStatusSensor(DynamicPresenceSensor):
     """Representation of a Night Mode Status sensor."""
 
-    def __init__(self, coordinator, entry: ConfigEntry):
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
         """Initialize the Night Mode Status sensor."""
         super().__init__(
             coordinator,
@@ -215,8 +215,15 @@ class NightModeStatusSensor(DynamicPresenceSensor):
     @property
     def native_value(self) -> str:
         """Return the current status of Night Mode."""
-        status = "Active" if self.coordinator.is_night_mode_active() else "Inactive"
-        _LOGGER.debug(
-            "Night mode status for %s: %s", self.coordinator.room_name, status
-        )
-        return status
+        if self.coordinator is None:
+            _LOGGER.error("Coordinator is None for %s", self.entity_id)
+            return "Unknown"
+        try:
+            status = "Active" if self.coordinator.is_night_mode_active() else "Inactive"
+            _LOGGER.debug(
+                "Night mode status for %s: %s", self.coordinator.room_name, status
+            )
+            return status
+        except Exception:
+            _LOGGER.exception("Error getting night mode status for %s", self.entity_id)
+            return "Error"

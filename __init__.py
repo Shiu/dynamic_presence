@@ -5,7 +5,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 from .const import (
     CONF_NIGHT_MODE_ENABLE,
@@ -18,10 +18,10 @@ from .controller import DynamicPresenceController
 
 # Define the platforms used by this integration
 PLATFORMS: list[Platform] = [
-    Platform.SWITCH,
     Platform.NUMBER,
-    Platform.TIME,
     Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.TIME,
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,36 +38,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Setting up Dynamic Presence for room: %s", room_name)
     _LOGGER.debug("Config entry data: %s", entry.data)
 
+    def raise_config_entry_not_ready(message: str):
+        _LOGGER.error(message)
+        raise ConfigEntryNotReady(message)
+
     try:
         # Create and set up the controller
         controller = DynamicPresenceController(hass, entry)
+        _LOGGER.debug("DynamicPresenceController initialized for %s", room_name)
+
         setup_success = await controller.async_setup()
+        _LOGGER.debug("Controller async_setup completed with result: %s", setup_success)
 
         if not setup_success:
-            _LOGGER.error("Failed to set up Dynamic Presence for %s", room_name)
-            raise ConfigEntryNotReady(
+            raise_config_entry_not_ready(
                 f"Failed to set up Dynamic Presence for {room_name}"
             )
+        else:
+            # Store the controller in hass.data
+            hass.data[DOMAIN][entry.entry_id] = controller
 
-        # Store the controller in hass.data
-        hass.data[DOMAIN][entry.entry_id] = controller
+            # Set up all the platforms for this integration
+            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-        # Set up all the platforms for this integration
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+            # Register an update listener to handle config entry updates
+            entry.async_on_unload(entry.add_update_listener(async_update_options))
 
-        # Register an update listener to handle config entry updates
-        entry.async_on_unload(entry.add_update_listener(async_update_options))
+            _LOGGER.info("Successfully set up Dynamic Presence for %s", room_name)
+            return True
 
-        _LOGGER.info("Successfully set up Dynamic Presence for %s", room_name)
-        return True
-
-    except Exception as ex:
+    except (HomeAssistantError, ConfigEntryNotReady) as ex:
         _LOGGER.exception(
-            "Unexpected error setting up Dynamic Presence for %s: %s", room_name, ex
+            "Detailed error setting up Dynamic Presence for %s", room_name
         )
-        raise ConfigEntryNotReady(
-            f"Unexpected error setting up Dynamic Presence for {room_name}"
-        ) from ex
+        raise ConfigEntryNotReady from ex
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -89,7 +93,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     try:
         await controller.async_update_config(entry.options)
         _LOGGER.info("Successfully updated options for %s", room_name)
-    except Exception as ex:
+    except (HomeAssistantError, ValueError) as ex:
         _LOGGER.error("Failed to update options for %s: %s", room_name, ex)
 
 
@@ -113,9 +117,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Failed to unload all platforms for %s", room_name)
 
         return unload_ok
-
-    except Exception as ex:
-        _LOGGER.exception("Error unloading Dynamic Presence for %s: %s", room_name, ex)
+    except HomeAssistantError:
+        _LOGGER.exception("Error unloading Dynamic Presence for %s", room_name)
         return False
 
 
