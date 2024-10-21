@@ -5,11 +5,15 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .active_room import ActiveRoom
 from .const import (
+    CONF_CONTROLLED_ENTITIES,
+    CONF_MANAGE_ON_CLEAR,
+    CONF_MANAGE_ON_PRESENCE,
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
     DEFAULT_NIGHT_MODE_END,
@@ -36,7 +40,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
         )
         self.entry = entry
-        self.presence_detector = PresenceDetector(hass, entry)
+        self.presence_detector = PresenceDetector(hass, entry, self)
         self.night_mode = NightMode(hass, entry)
         self.active_room = ActiveRoom(hass, entry)
         self.data = {}
@@ -205,3 +209,24 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Refresh data from the presence detector."""
         await self._async_update_data()
         self.async_set_updated_data(self.data)
+
+    async def update_controlled_entities(self):
+        """Update controlled entities based on presence state."""
+        controlled_entities = self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
+        manage_on_presence = self.entry.options.get(CONF_MANAGE_ON_PRESENCE, True)
+        manage_on_clear = self.entry.options.get(CONF_MANAGE_ON_CLEAR, True)
+
+        for entity_id in controlled_entities:
+            try:
+                if self.presence_detected and manage_on_presence:
+                    await self.hass.services.async_call(
+                        "homeassistant", "turn_on", {"entity_id": entity_id}
+                    )
+                elif not self.presence_detected and manage_on_clear:
+                    await self.hass.services.async_call(
+                        "homeassistant", "turn_off", {"entity_id": entity_id}
+                    )
+            except HomeAssistantError as e:
+                _LOGGER.error(
+                    "Error updating controlled entity %s: %s", entity_id, str(e)
+                )
