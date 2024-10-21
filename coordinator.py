@@ -58,17 +58,52 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         for key, config in NUMBER_CONFIG.items():
             self.data[key] = entry.options.get(key, config["default"])
 
+        # Ensure switch states are preserved
+        for switch in [
+            CONF_ENABLE,
+            CONF_NIGHT_MODE_ENABLE,
+            CONF_ENABLE_ON_PRESENCE,
+            CONF_DISABLE_ON_CLEAR,
+        ]:
+            if switch not in self.data:
+                self.data[switch] = entry.options.get(switch, True)
+
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
-        await self.presence_detector.update_presence()
-        self.active_room.update_activity(self.presence_detector.presence_detected)
+        try:
+            await self.presence_detector.update_presence()
+            self.active_room.update_activity(self.presence_detector.presence_detected)
 
-        return {
-            "presence_detected": self.presence_detector.presence_detected,
-            "last_presence_time": self.presence_detector.last_presence_time,
-            "is_night_mode": self.night_mode.is_night_mode_active(),
-            "is_active_room": self.active_room.is_active,
-        }
+            self.data.update(
+                {
+                    "presence_detected": self.presence_detector.presence_detected,
+                    "last_presence_time": self.presence_detector.last_presence_time,
+                    "is_night_mode": self.night_mode.is_night_mode_active(),
+                    "is_active_room": self.active_room.is_active,
+                    "presence_duration": self.presence_detector.get_presence_duration(),
+                    "absence_duration": self.presence_detector.get_absence_duration(),
+                    "active_room_status": "active"
+                    if self.active_room.is_active
+                    else "inactive",
+                    "presence_sensor_state": "on"
+                    if self.presence_detector.presence_detected
+                    else "off",
+                    "night_mode_status": "on"
+                    if self.night_mode.is_night_mode_active()
+                    else "off",
+                }
+            )
+
+            _LOGGER.debug("Updated coordinator data: %s", self.data)
+            return self.data
+        except AttributeError as e:
+            _LOGGER.error("Error updating data: %s", str(e))
+        except (ValueError, TypeError) as e:
+            _LOGGER.error("Unexpected error updating data: %s", str(e))
+        else:
+            _LOGGER.debug("Updated coordinator data: %s", self.data)
+
+        return self.data
 
     async def async_update_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""

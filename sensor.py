@@ -74,7 +74,11 @@ class DynamicPresenceSensor(SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        return self.coordinator.data.get(self._key)
+        value = self.coordinator.data.get(self._key)
+        _LOGGER.debug(f"Sensor {self._attr_name} value: {value}")
+        if value is None:
+            _LOGGER.warning(f"Sensor {self._attr_name} has no value in coordinator data")
+        return value
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
@@ -85,3 +89,4 @@ class DynamicPresenceSensor(SensorEntity):
     async def async_update(self):
         """Update the entity."""
         await self.coordinator.async_request_refresh()
+

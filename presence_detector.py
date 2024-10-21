@@ -51,3 +51,15 @@ class PresenceDetector:
     def set_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""
         self.presence_timeout = new_timeout
+
+    def get_presence_duration(self):
+        """Get the duration of the current presence."""
+        if self.presence_detected and self.last_presence_time:
+            return (datetime.now() - self.last_presence_time).total_seconds()
+        return 0
+
+    def get_absence_duration(self):
+        """Get the duration of the current absence."""
+        if not self.presence_detected and self.last_presence_time:
+            return (datetime.now() - self.last_presence_time).total_seconds()
+        return 0
