@@ -1,5 +1,6 @@
 """Coordinator for Dynamic Presence integration."""
 
+from datetime import timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -38,6 +39,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
+            update_interval=timedelta(seconds=1),  # Update every second
         )
         self.entry = entry
         self.presence_detector = PresenceDetector(hass, entry, self)
@@ -67,44 +69,13 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
+        self.room_name = (
+            entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
+        )
+
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
-        try:
-            await self.presence_detector.update_presence()
-            self.active_room.update_activity(self.presence_detector.presence_detected)
-
-            room_name = (
-                self.entry.data.get(CONF_ROOM_NAME, "Unknown Room")
-                .lower()
-                .replace(" ", "_")
-            )
-
-            updated_data = {
-                f"{room_name}_occupancy_duration": self.presence_detector.get_presence_duration(),
-                f"{room_name}_absence_duration": self.presence_detector.get_absence_duration(),
-                f"{room_name}_active_room_status": "active"
-                if self.active_room.is_active
-                else "inactive",
-                f"{room_name}_occupancy_state": "occupied"
-                if self.presence_detector.presence_detected
-                else "vacant",
-                f"{room_name}_night_mode_status": "on"
-                if self.night_mode.is_night_mode_active()
-                else "off",
-            }
-
-            for key, value in updated_data.items():
-                _LOGGER.debug("Updating %s with value: %s", key, value)
-                self.data[key] = value
-
-            _LOGGER.debug("Updated coordinator data: %s", self.data)
-        except AttributeError as e:
-            _LOGGER.error("AttributeError updating data: %s", str(e))
-        except ValueError as e:
-            _LOGGER.error("ValueError updating data: %s", str(e))
-        except TypeError as e:
-            _LOGGER.error("TypeError updating data: %s", str(e))
-
+        await self.presence_detector.update_presence()
         return self.data
 
     async def async_update_presence_timeout(self, new_timeout: int):

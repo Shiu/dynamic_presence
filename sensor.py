@@ -1,21 +1,19 @@
 """Sensor platform for Dynamic Presence integration."""
 
 import logging
-from datetime import datetime, timedelta
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.const import UnitOfTime
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    DOMAIN,
-    CONF_ROOM_NAME,
-    SENSOR_KEYS,
-)
+from .const import CONF_ROOM_NAME, DOMAIN, SENSOR_KEYS
 from .coordinator import DynamicPresenceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,8 +67,26 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         value = self.coordinator.data.get(self._key)
-        _LOGGER.debug("Sensor %s returning value: %s", self.entity_id, value)
+        _LOGGER.debug(
+            "Sensor %s getting value from coordinator: %s", self.entity_id, value
+        )
+        if "duration" in self._key:
+            return int(value) if value is not None else 0
         return value
+
+    @property
+    def state_class(self):
+        """Return the state class of the sensor."""
+        if "duration" in self._key:
+            return SensorStateClass.MEASUREMENT
+        return None
+
+    @property
+    def device_class(self):
+        """Return the device class of the sensor."""
+        if "duration" in self._key:
+            return SensorDeviceClass.DURATION
+        return None
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""

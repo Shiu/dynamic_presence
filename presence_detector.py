@@ -5,7 +5,7 @@ managing and updating the presence state based on a configured presence sensor.
 It handles presence timeout logic and provides methods to update the presence state.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -43,6 +43,8 @@ class PresenceDetector:
         self.last_presence_time = None
         self.last_absence_time = None
         self.presence_detected = False
+        self.grace_period = timedelta(seconds=15)
+        self.last_absence_start = None
 
     async def update_presence(self):
         """Update the presence state based on the presence sensor."""
@@ -52,31 +54,58 @@ class PresenceDetector:
             return
 
         new_presence = presence_sensor.state == "on"
-        if new_presence != self.presence_detected:
-            self.presence_detected = new_presence
-            if self.presence_detected:
-                self.last_presence_time = datetime.now()
-            else:
-                self.last_absence_time = datetime.now()
+        current_time = datetime.now()
 
-            await self.update_controlled_entities()
+        if new_presence:
+            if not self.presence_detected:
+                self.last_presence_time = current_time
+                _LOGGER.info("New occupancy detected")
+            self.presence_detected = True
+            self.last_absence_start = None
+        elif self.presence_detected:
+            if not self.last_absence_start:
+                self.last_absence_start = current_time
+                _LOGGER.debug("Potential absence detected, starting grace period")
+            elif (current_time - self.last_absence_start) >= self.grace_period:
+                self.presence_detected = False
+                self.last_absence_time = self.last_absence_start
+                _LOGGER.info("Absence confirmed after grace period")
+
+        if self.presence_detected:
+            occupancy_duration = (
+                int((current_time - self.last_presence_time).total_seconds())
+                if self.last_presence_time
+                else 0
+            )
+            absence_duration = 0
+        else:
+            occupancy_duration = 0
+            absence_duration = (
+                int((current_time - self.last_absence_time).total_seconds())
+                if self.last_absence_time
+                else 0
+            )
 
         self.coordinator.data.update(
             {
-                "occupancy_state": "occupied" if self.presence_detected else "vacant",
-                "occupancy_duration": self.get_presence_duration(),
-                "absence_duration": self.get_absence_duration(),
+                f"{self.coordinator.room_name}_occupancy_state": "occupied"
+                if self.presence_detected
+                else "vacant",
+                f"{self.coordinator.room_name}_occupancy_duration": occupancy_duration,
+                f"{self.coordinator.room_name}_absence_duration": absence_duration,
             }
         )
+
+        await self.update_controlled_entities()
 
     def set_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""
         self.presence_timeout = new_timeout
 
     def get_presence_duration(self):
-        """Get the duration of the current presence."""
+        """Get the duration of the current presence in seconds."""
         if self.presence_detected and self.last_presence_time:
-            return (datetime.now() - self.last_presence_time).total_seconds()
+            return int((datetime.now() - self.last_presence_time).total_seconds())
         return 0
 
     def get_absence_duration(self):
