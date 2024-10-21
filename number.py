@@ -6,7 +6,6 @@ from homeassistant.components.number import NumberEntity, NumberEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
@@ -14,75 +13,63 @@ from .const import (
     CONF_NIGHT_MODE_SCALE,
     CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_TIMEOUT,
+    CONF_ROOM_NAME,
     DOMAIN,
     NUMBER_CONFIG,
 )
-from .controller import DynamicPresenceController
-from .entity import DynamicPresenceEntity, set_entity_properties
+from .coordinator import DynamicPresenceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-# pylint: disable=abstract-method
-class DynamicPresenceNumber(DynamicPresenceEntity, NumberEntity):
+class DynamicPresenceNumber(NumberEntity):
     """Representation of a Dynamic Presence number setting."""
 
     def __init__(
         self,
-        coordinator: DynamicPresenceController,
+        coordinator: DynamicPresenceCoordinator,
         description: NumberEntityDescription,
     ) -> None:
         """Initialize the Dynamic Presence number entity."""
-        super().__init__(coordinator, coordinator.config_entry, description)
-        self._attr_unique_id, name, entity_id = set_entity_properties(
-            coordinator, description
-        )
-        if name is not None:
-            self._attr_name = name
-        self.entity_id = f"{DOMAIN}.{entity_id}"
+        self.coordinator = coordinator
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{description.key}"
+        self._attr_name = f"Dynamic Presence {description.name}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.entry.entry_id)},
+            "name": f"Dynamic Presence {coordinator.entry.data.get(CONF_ROOM_NAME, 'Unknown Room')}",
+            "manufacturer": "Custom",
+            "model": "Dynamic Presence",
+        }
 
     @property
     def native_value(self) -> float | None:
         """Return the current value."""
-        if self.coordinator is None or self.coordinator.data is None:
-            _LOGGER.error(
-                "Coordinator or coordinator data is None for %s", self.entity_id
+        return float(
+            self.coordinator.data.get(
+                self.entity_description.key,
+                NUMBER_CONFIG[self.entity_description.key]["default"],
             )
-            return None
-
-        value = self.coordinator.data.get(
-            self.entity_description.key,
-            NUMBER_CONFIG[self.entity_description.key]["default"],
         )
-        _LOGGER.debug("Value for %s: %s", self.entity_id, value)
-        return float(value)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the new value of the number entity."""
-        _LOGGER.info("Setting new value for %s: %s", self.entity_description.key, value)
-        try:
-            await self.coordinator.async_update_config(
-                {self.entity_description.key: int(value)}
-            )
-        except Exception as e:
-            _LOGGER.error(
-                "Failed to set value for %s: %s", self.entity_description.key, e
-            )
-            raise UpdateFailed(
-                f"Failed to set value for {self.entity_description.key}"
-            ) from e
+        await self.coordinator.async_update_number(
+            self.entity_description.key, int(value)
+        )
+
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Dynamic Presence number entities based on a config entry."""
-    controller: DynamicPresenceController = hass.data[DOMAIN][entry.entry_id]
-
-    _LOGGER.info("Setting up number entities for %s", controller.room_name)
-
-    # Wait for the coordinator to complete its first update
-    await controller.async_config_entry_first_refresh()
+    coordinator = hass.data[DOMAIN][entry.entry_id]
 
     number_descriptions = [
         NumberEntityDescription(
@@ -129,9 +116,7 @@ async def async_setup_entry(
         ),
     ]
 
-    entities = [DynamicPresenceNumber(controller, desc) for desc in number_descriptions]
-
+    entities = [
+        DynamicPresenceNumber(coordinator, desc) for desc in number_descriptions
+    ]
     async_add_entities(entities)
-    _LOGGER.debug(
-        "Added %d number entities for %s", len(entities), controller.room_name
-    )

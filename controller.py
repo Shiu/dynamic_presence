@@ -4,10 +4,11 @@ from collections.abc import Callable
 from datetime import timedelta
 import logging
 from typing import Any
+from weakref import WeakSet
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -15,7 +16,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -56,7 +57,7 @@ class DynamicPresenceController(DataUpdateCoordinator):
         _LOGGER.info("Initializing DynamicPresenceController for %s", self.room_name)
         self._enabled = True
         self._timers: dict[str, Callable[[], None]] = {}
-        self._listeners: dict[str, Callable[[], None]] = {}
+        self._listeners = WeakSet()
         self.presence_detected = False
         self.is_active_room = False
         self.presence_start_time: dt_util.dt.datetime | None = None
@@ -167,22 +168,22 @@ class DynamicPresenceController(DataUpdateCoordinator):
             return True
 
     async def async_unload(self) -> None:
-        """Unload the Dynamic Presence Controller."""
-        try:
-            if self._remove_state_listener:
-                self._remove_state_listener()
-
-            for timer in self._timers.values():
-                timer()
-            self._timers.clear()
-
-            for remove_listener in self._listeners.values():
+        """Unload the controller."""
+        _LOGGER.debug("Unloading controller for %s", self.room_name)
+        if hasattr(self, "_remove_state_listener"):
+            self._remove_state_listener()
+        for timer in self._timers.values():
+            timer()
+        self._timers.clear()
+        for remove_listener in list(self._listeners):
+            if callable(remove_listener):
                 remove_listener()
-            self._listeners.clear()
-
-            _LOGGER.info("Unloaded Dynamic Presence Controller")
-        except HomeAssistantError as e:
-            _LOGGER.error("Error unloading Dynamic Presence Controller: %s", str(e))
+            elif isinstance(remove_listener, tuple):
+                for listener in remove_listener:
+                    if callable(listener):
+                        listener()
+        self._listeners.clear()
+        _LOGGER.info("Unloaded Dynamic Presence Controller for %s", self.room_name)
 
     async def async_added_to_hass(self) -> None:
         """Add entity to Home Assistant."""
@@ -474,16 +475,18 @@ class DynamicPresenceController(DataUpdateCoordinator):
         _LOGGER.debug("New configuration data for %s: %s", self.room_name, new_data)
         try:
             validated_data = self._validate_config(new_data)
-            self.config_entry.options = {**self.config_entry.options, **validated_data}
-            self._load_config_values()
+            new_options = {**self.config_entry.options, **validated_data}
             self.hass.config_entries.async_update_entry(
-                self.config_entry, options=self.config_entry.options
+                self.config_entry, options=new_options
             )
-            self._dispatch_update()
-            await self.async_update_ha_state()
-            _LOGGER.info("Successfully updated Dynamic Presence configuration")
-        except (ValueError, HomeAssistantError) as e:
-            _LOGGER.error("Error updating Dynamic Presence configuration: %s", str(e))
+            self._load_config_values()
+            await self.async_refresh()
+            async_dispatcher_send(self.hass, f"{DOMAIN}_{self.room_name}_update")
+        except ValueError as err:
+            _LOGGER.error(
+                "Failed to update configuration for %s: %s", self.room_name, err
+            )
+            raise UpdateFailed(f"Failed to update configuration: {err}") from err
 
     def _validate_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate configuration values."""
@@ -543,3 +546,22 @@ class DynamicPresenceController(DataUpdateCoordinator):
     async def async_update_ha_state(self):
         """Update Home Assistant with current state."""
         self.async_write_ha_state()
+
+    @callback
+    def async_add_listener(
+        self, update_callback: CALLBACK_TYPE, context: Any = None
+    ) -> Callable[[], None]:
+        """Listen for data updates."""
+        self._listeners.add(update_callback)
+
+        def remove_listener() -> None:
+            """Remove update listener."""
+            self._listeners.discard(update_callback)
+
+        return remove_listener
+
+    @callback
+    def async_update_listeners(self) -> None:
+        """Update all registered listeners."""
+        for update_callback in list(self._listeners):
+            update_callback()

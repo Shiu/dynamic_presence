@@ -17,13 +17,26 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_ACTIVE_ROOM_THRESHOLD,
+    CONF_ACTIVE_ROOM_TIMEOUT,
     CONF_CONTROLLED_ENTITIES,
+    CONF_DISABLE_ON_CLEAR,
+    CONF_ENABLE_ON_PRESENCE,
     CONF_NIGHT_MODE_ENABLE,
     CONF_NIGHT_MODE_END,
+    CONF_NIGHT_MODE_SCALE,
     CONF_NIGHT_MODE_START,
+    CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_SENSOR,
+    CONF_PRESENCE_TIMEOUT,
     CONF_ROOM_NAME,
+    DEFAULT_DISABLE_ON_CLEAR,
+    DEFAULT_ENABLE_ON_PRESENCE,
+    DEFAULT_NIGHT_MODE_ENABLE,
+    DEFAULT_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
     DOMAIN,
+    NUMBER_CONFIG,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +75,9 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
+                user_input[CONF_ROOM_NAME] = validate_room_name(
+                    user_input[CONF_ROOM_NAME]
+                )
                 return self.async_create_entry(
                     title=f"Dynamic Presence {user_input[CONF_ROOM_NAME]}",
                     data=user_input,
@@ -123,19 +139,77 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
                 ),
+                vol.Optional(
+                    CONF_PRESENCE_TIMEOUT,
+                    default=options.get(
+                        CONF_PRESENCE_TIMEOUT,
+                        NUMBER_CONFIG[CONF_PRESENCE_TIMEOUT]["default"],
+                    ),
+                ): int,
+                vol.Optional(
+                    CONF_ACTIVE_ROOM_TIMEOUT,
+                    default=options.get(
+                        CONF_ACTIVE_ROOM_TIMEOUT,
+                        NUMBER_CONFIG[CONF_ACTIVE_ROOM_TIMEOUT]["default"],
+                    ),
+                ): int,
+                vol.Optional(
+                    CONF_ACTIVE_ROOM_THRESHOLD,
+                    default=options.get(
+                        CONF_ACTIVE_ROOM_THRESHOLD,
+                        NUMBER_CONFIG[CONF_ACTIVE_ROOM_THRESHOLD]["default"],
+                    ),
+                ): int,
                 vol.Required(
                     CONF_NIGHT_MODE_ENABLE,
-                    default=options.get(CONF_NIGHT_MODE_ENABLE, False),
+                    default=options.get(
+                        CONF_NIGHT_MODE_ENABLE, DEFAULT_NIGHT_MODE_ENABLE
+                    ),
                 ): bool,
                 vol.Optional(
+                    CONF_NIGHT_MODE_TIMEOUT,
+                    default=options.get(
+                        CONF_NIGHT_MODE_TIMEOUT,
+                        NUMBER_CONFIG[CONF_NIGHT_MODE_TIMEOUT]["default"],
+                    ),
+                ): int,
+                vol.Optional(
                     CONF_NIGHT_MODE_START,
-                    default=options.get(CONF_NIGHT_MODE_START, "22:00"),
-                ): str,
+                    default=options.get(
+                        CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
+                    ),
+                ): selector.TimeSelector(),
                 vol.Optional(
                     CONF_NIGHT_MODE_END,
-                    default=options.get(CONF_NIGHT_MODE_END, "06:00"),
-                ): str,
+                    default=options.get(CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_NIGHT_MODE_SCALE,
+                    default=options.get(
+                        CONF_NIGHT_MODE_SCALE,
+                        NUMBER_CONFIG[CONF_NIGHT_MODE_SCALE]["default"],
+                    ),
+                ): float,
+                vol.Optional(
+                    CONF_ENABLE_ON_PRESENCE,
+                    default=options.get(
+                        CONF_ENABLE_ON_PRESENCE, DEFAULT_ENABLE_ON_PRESENCE
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_DISABLE_ON_CLEAR,
+                    default=options.get(
+                        CONF_DISABLE_ON_CLEAR, DEFAULT_DISABLE_ON_CLEAR
+                    ),
+                ): bool,
             }
         )
 
-        return self.async_show_form(step_id="init", data_schema=data_schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
+            description_placeholders={
+                "night_mode_start_description": "Time when night mode starts",
+                "night_mode_end_description": "Time when night mode ends",
+            },
+        )

@@ -1,6 +1,7 @@
 """Constants for the Dynamic Presence integration."""
 
 import logging
+
 from homeassistant.const import UnitOfTime
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,6 +77,12 @@ NUMBER_CONFIG = {
 DEFAULT_NIGHT_MODE_START = "23:00"
 DEFAULT_NIGHT_MODE_END = "07:00"
 
+# Default values for switches
+DEFAULT_ENABLE = True
+DEFAULT_NIGHT_MODE_ENABLE = True
+DEFAULT_ENABLE_ON_PRESENCE = True
+DEFAULT_DISABLE_ON_CLEAR = True
+
 # Define the order of configuration options
 CONFIG_OPTIONS_ORDER = [
     CONF_PRESENCE_TIMEOUT,
@@ -99,5 +106,10 @@ NIGHT_MODE_BEHAVIOR_EXCLUSIVE = (
 
 # Default night mode entities behavior
 DEFAULT_NIGHT_MODE_ENTITIES_BEHAVIOR = NIGHT_MODE_BEHAVIOR_EXCLUSIVE
+
+# New constants for switches
+CONF_GLOBAL_ENABLE = "global_enable"
+CONF_ENABLE_ON_PRESENCE = "enable_on_presence"
+CONF_DISABLE_ON_CLEAR = "disable_on_clear"
 
 _LOGGER.debug("Dynamic Presence constants loaded. Version: %s", VERSION)

@@ -1,17 +1,17 @@
-"""Sensor platform for Dynamic Presence."""
-
-from __future__ import annotations
+"""Sensor platform for Dynamic Presence integration."""
 
 import logging
+from datetime import datetime, timedelta
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
+from homeassistant.const import UnitOfTime
+from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN
-from .entity import DynamicPresenceEntity, set_entity_properties
+from .const import DOMAIN, CONF_ROOM_NAME
+from .coordinator import DynamicPresenceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,214 +19,69 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the Dynamic Presence sensor entities.
+    """Set up Dynamic Presence sensor based on a config entry."""
+    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
+    _LOGGER.info("Setting up Dynamic Presence sensors for %s", room_name)
 
-    This function is called when a new config entry is added. It creates and adds
-    all the sensor entities for the Dynamic Presence integration.
-    """
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    _LOGGER.info("Setting up Dynamic Presence sensors for %s", coordinator.room_name)
-
-    # Wait for the coordinator to complete its first update
-    await coordinator.async_config_entry_first_refresh()
 
     sensors = [
-        PresenceDurationSensor(coordinator, entry),
-        AbsenceDurationSensor(coordinator, entry),
-        ActiveRoomStatusSensor(coordinator, entry),
-        PresenceSensorStateSensor(coordinator, entry),
-        NightModeStatusSensor(coordinator, entry),
+        DynamicPresenceSensor(
+            coordinator, "presence_duration", "Presence Duration", UnitOfTime.SECONDS
+        ),
+        DynamicPresenceSensor(
+            coordinator, "absence_duration", "Absence Duration", UnitOfTime.SECONDS
+        ),
+        DynamicPresenceSensor(
+            coordinator, "active_room_status", "Active Room Status", None
+        ),
+        DynamicPresenceSensor(
+            coordinator, "presence_sensor_state", "Presence Sensor State", None
+        ),
+        DynamicPresenceSensor(
+            coordinator, "night_mode_status", "Night Mode Status", None
+        ),
     ]
 
     async_add_entities(sensors)
-    _LOGGER.debug(
-        "Added %d Dynamic Presence sensors for %s", len(sensors), coordinator.room_name
-    )
+    _LOGGER.debug("Added %d Dynamic Presence sensors for %s", len(sensors), room_name)
 
 
-class DynamicPresenceSensor(DynamicPresenceEntity, SensorEntity):
-    """Base class for Dynamic Presence sensors.
-
-    This class extends DynamicPresenceEntity and SensorEntity to provide
-    common functionality for all Dynamic Presence sensors.
-    """
+class DynamicPresenceSensor(SensorEntity):
+    """Representation of a Dynamic Presence sensor."""
 
     def __init__(
         self,
-        coordinator,
-        config_entry: ConfigEntry,
-        description: SensorEntityDescription,
+        coordinator: DynamicPresenceCoordinator,
+        key: str,
+        name: str,
+        unit: str | None,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator, config_entry, description)
-        self._attr_unique_id, name, entity_id = set_entity_properties(
-            coordinator, description
-        )
-        if name is not None:
-            self._attr_name = name
-        self.entity_id = f"{DOMAIN}.{entity_id}"
-
-
-class PresenceDurationSensor(DynamicPresenceSensor):
-    """Representation of a Presence Duration sensor."""
-
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        """Initialize the Presence Duration sensor."""
-        super().__init__(
-            coordinator,
-            entry,
-            SensorEntityDescription(
-                key="presence_duration",
-                name="Presence Duration",
-                icon="mdi:timer",
-                native_unit_of_measurement="seconds",
-            ),
-        )
+        self.coordinator = coordinator
+        self._key = key
+        self._attr_name = f"Dynamic Presence {name}"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = SensorStateClass.MEASUREMENT
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.entry.entry_id)},
+            "name": f"Dynamic Presence {coordinator.entry.data.get(CONF_ROOM_NAME, 'Unknown Room')}",
+            "manufacturer": "Custom",
+            "model": "Dynamic Presence",
+        }
 
     @property
-    def native_value(self) -> int:
-        """Return the current presence duration in seconds.
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self.coordinator.data.get(self._key)
 
-        Calculates the time difference between now and when presence was first detected.
-        """
-        if self.coordinator.presence_detected and self.coordinator.presence_start_time:
-            duration = int(
-                (
-                    dt_util.utcnow() - self.coordinator.presence_start_time
-                ).total_seconds()
-            )
-            _LOGGER.debug(
-                "Presence duration for %s: %d seconds",
-                self.coordinator.room_name,
-                duration,
-            )
-            return duration
-        return 0
-
-
-class AbsenceDurationSensor(DynamicPresenceSensor):
-    """Representation of an Absence Duration sensor."""
-
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        """Initialize the Absence Duration sensor."""
-        super().__init__(
-            coordinator,
-            entry,
-            SensorEntityDescription(
-                key="absence_duration",
-                name="Absence Duration",
-                icon="mdi:timer-off",
-                native_unit_of_measurement="seconds",
-            ),
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
         )
 
-    @property
-    def native_value(self) -> int:
-        """Return the current absence duration in seconds.
-
-        Calculates the time difference between now and when presence was last detected.
-        """
-        if (
-            not self.coordinator.presence_detected
-            and self.coordinator.last_presence_end_time
-        ):
-            duration = int(
-                (
-                    dt_util.utcnow() - self.coordinator.last_presence_end_time
-                ).total_seconds()
-            )
-            _LOGGER.debug(
-                "Absence duration for %s: %d seconds",
-                self.coordinator.room_name,
-                duration,
-            )
-            return duration
-        return 0
-
-
-class ActiveRoomStatusSensor(DynamicPresenceSensor):
-    """Representation of an Active Room Status sensor."""
-
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        """Initialize the Active Room Status sensor."""
-        super().__init__(
-            coordinator,
-            entry,
-            SensorEntityDescription(
-                key="active_room_status",
-                name="Active Room Status",
-                icon="mdi:home-circle",
-            ),
-        )
-
-    @property
-    def native_value(self) -> str:
-        """Return the current active room status.
-
-        Returns "Active" if the room is currently active, "Inactive" otherwise.
-        """
-        status = "Active" if self.coordinator.is_active_room else "Inactive"
-        _LOGGER.debug(
-            "Active room status for %s: %s", self.coordinator.room_name, status
-        )
-        return status
-
-
-class PresenceSensorStateSensor(DynamicPresenceSensor):
-    """Representation of a Presence Sensor State sensor."""
-
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        """Initialize the Presence Sensor State sensor."""
-        super().__init__(
-            coordinator,
-            entry,
-            SensorEntityDescription(
-                key="presence_sensor_state",
-                name="Presence Sensor State",
-                icon="mdi:motion-sensor",
-            ),
-        )
-
-    @property
-    def native_value(self) -> str:
-        """Return the current state of the presence sensor.
-
-        Returns "Detected" if presence is currently detected, "Clear" otherwise.
-        """
-        state = "Detected" if self.coordinator.presence_detected else "Clear"
-        _LOGGER.debug(
-            "Presence sensor state for %s: %s", self.coordinator.room_name, state
-        )
-        return state
-
-
-class NightModeStatusSensor(DynamicPresenceSensor):
-    """Representation of a Night Mode Status sensor."""
-
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        """Initialize the Night Mode Status sensor."""
-        super().__init__(
-            coordinator,
-            entry,
-            SensorEntityDescription(
-                key="night_mode_status",
-                name="Night Mode Status",
-                icon="mdi:weather-night",
-            ),
-        )
-
-    @property
-    def native_value(self) -> str:
-        """Return the current status of Night Mode."""
-        if self.coordinator is None:
-            _LOGGER.error("Coordinator is None for %s", self.entity_id)
-            return "Unknown"
-        try:
-            status = "Active" if self.coordinator.is_night_mode_active() else "Inactive"
-            _LOGGER.debug(
-                "Night mode status for %s: %s", self.coordinator.room_name, status
-            )
-            return status
-        except Exception:
-            _LOGGER.exception("Error getting night mode status for %s", self.entity_id)
-            return "Error"
+    async def async_update(self):
+        """Update the entity."""
+        await self.coordinator.async_request_refresh()
