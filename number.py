@@ -40,6 +40,7 @@ class DynamicPresenceNumber(NumberEntity):
         self._attr_native_step = description.native_step
         self._attr_mode = description.mode
         self._attr_device_info = coordinator.get_device_info(room)
+        self._attr_native_value = coordinator.data.get(self.entity_description.key)
 
     @property
     def unique_id(self):

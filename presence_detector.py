@@ -63,3 +63,13 @@ class PresenceDetector:
         if not self.presence_detected and self.last_presence_time:
             return (datetime.now() - self.last_presence_time).total_seconds()
         return 0
+
+    async def _handle_state_change(self, event):
+        """Handle state changes for the presence sensor."""
+        if event.data.get("entity_id") == self.presence_sensor:
+            await self.async_refresh()
+
+    async def async_refresh(self):
+        """Refresh data from the presence detector."""
+        await self._async_update_data()
+        self.async_set_updated_data(self.data)

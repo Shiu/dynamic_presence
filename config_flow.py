@@ -119,6 +119,17 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
+            _LOGGER.debug(
+                "Updating presence sensor to: %s", user_input[CONF_PRESENCE_SENSOR]
+            )
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={
+                    **self.config_entry.data,
+                    CONF_PRESENCE_SENSOR: user_input[CONF_PRESENCE_SENSOR],
+                },
+                options=user_input,
+            )
             return self.async_create_entry(title="", data=user_input)
 
         options = {**self.config_entry.data, **self.config_entry.options}

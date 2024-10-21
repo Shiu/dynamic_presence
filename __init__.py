@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import DOMAIN, CONF_ROOM_NAME
+from .const import CONF_PRESENCE_SENSOR, CONF_ROOM_NAME, DOMAIN
 from .coordinator import DynamicPresenceCoordinator
 
 PLATFORMS: list[Platform] = [
@@ -23,13 +23,16 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
+    _LOGGER.debug(
+        "Setting up Dynamic Presence with presence sensor: %s",
+        entry.data[CONF_PRESENCE_SENSOR],
+    )
+
     coordinator = DynamicPresenceCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     return True

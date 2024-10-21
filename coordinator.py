@@ -1,15 +1,16 @@
 """Coordinator for Dynamic Presence integration."""
 
-from datetime import timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .active_room import ActiveRoom
 from .const import (
+    CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
     DEFAULT_NIGHT_MODE_END,
     DEFAULT_NIGHT_MODE_START,
@@ -33,7 +34,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),
         )
         self.entry = entry
         self.presence_detector = PresenceDetector(hass, entry)
@@ -58,6 +58,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["night_mode_end"] = entry.options.get(
             "night_mode_end", DEFAULT_NIGHT_MODE_END
         )
+
+        # Set up event listener for presence sensor
+        self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
+        hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
@@ -187,4 +191,17 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Update a time value."""
         self.data[key] = value
         await self.async_update_time(key, value)
+        self.async_set_updated_data(self.data)
+
+    async def _handle_state_change(self, event):
+        """Handle state changes for the presence sensor."""
+        if event.data.get("entity_id") == self.presence_sensor:
+            if self.hass.states.get(self.presence_sensor) is None:
+                _LOGGER.warning("Presence sensor %s not found", self.presence_sensor)
+                return
+            await self.async_refresh()
+
+    async def async_refresh(self):
+        """Refresh data from the presence detector."""
+        await self._async_update_data()
         self.async_set_updated_data(self.data)
