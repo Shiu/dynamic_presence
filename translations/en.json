@@ -22,7 +22,9 @@
                     "active_room_timeout": "Active Room Timeout",
                     "night_mode_start": "Night Mode Start",
                     "night_mode_end": "Night Mode End",
-                    "night_mode_timeout": "Night Mode Timeout"
+                    "night_mode_timeout": "Night Mode Timeout",
+                    "manage_on_clear": "Manage on Clear",
+                    "manage_on_presence": "Manage on Presence"
                 },
                 "data_description": {
                     "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
@@ -52,7 +54,9 @@
                     "active_room_timeout": "Active Room Timeout",
                     "night_mode_start": "Night Mode Start",
                     "night_mode_end": "Night Mode End",
-                    "night_mode_timeout": "Night Mode Timeout"
+                    "night_mode_timeout": "Night Mode Timeout",
+                    "manage_on_clear": "Manage on Clear",
+                    "manage_on_presence": "Manage on Presence"
                 },
                 "data_description": {
                     "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",

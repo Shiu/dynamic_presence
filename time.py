@@ -3,19 +3,12 @@
 from datetime import time
 import logging
 
-from homeassistant.components.time import TimeEntity
+from homeassistant.components.time import TimeEntity, TimeEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    CONF_NIGHT_MODE_END,
-    CONF_NIGHT_MODE_START,
-    CONF_ROOM_NAME,
-    DEFAULT_NIGHT_MODE_END,
-    DEFAULT_NIGHT_MODE_START,
-    DOMAIN,
-)
+from .const import CONF_ROOM_NAME, DOMAIN, TIME_KEYS
 from .coordinator import DynamicPresenceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,64 +18,65 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Dynamic Presence time entities based on a config entry."""
-    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
-    _LOGGER.info("Setting up time entities for %s", room_name)
-
+    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities = [
-        DynamicPresenceTime(coordinator, CONF_NIGHT_MODE_START, "Night Mode Start"),
-        DynamicPresenceTime(coordinator, CONF_NIGHT_MODE_END, "Night Mode End"),
+    time_entities = [
+        DynamicPresenceTime(
+            coordinator,
+            room_name,
+            TimeEntityDescription(
+                key=key,
+                name=key.replace("_", " ").title(),
+            ),
+        )
+        for key in TIME_KEYS
     ]
 
-    async_add_entities(entities)
-    _LOGGER.debug("Added %d time entities for %s", len(entities), room_name)
+    async_add_entities(time_entities)
+    _LOGGER.debug("Added %d time entities for %s", len(time_entities), room_name)
 
 
 class DynamicPresenceTime(TimeEntity):
     """Representation of a Dynamic Presence time setting."""
 
     def __init__(
-        self, coordinator: DynamicPresenceCoordinator, key: str, name: str
+        self,
+        coordinator: DynamicPresenceCoordinator,
+        room: str,
+        description: TimeEntityDescription,
     ) -> None:
-        """Initialize the time entity."""
+        """Initialize the Dynamic Presence time entity."""
+        super().__init__()
         self.coordinator = coordinator
-        self._key = key
-        self._attr_name = f"Dynamic Presence {name}"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.entry.entry_id)},
-            "name": f"Dynamic Presence {coordinator.entry.data.get(CONF_ROOM_NAME, 'Unknown Room')}",
-            "manufacturer": "Custom",
-            "model": "Dynamic Presence",
-        }
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_name = description.name
+        self.entity_id = f"time.dynamic_presence_{room}_{description.key}"
+        self._attr_device_info = coordinator.get_device_info(room)
+        self._key = description.key
 
     @property
-    def native_value(self) -> time:
+    def native_value(self):
         """Return the time value."""
-        default_value = (
-            DEFAULT_NIGHT_MODE_START
-            if self._key == CONF_NIGHT_MODE_START
-            else DEFAULT_NIGHT_MODE_END
-        )
-        value = self.coordinator.data.get(self._key, default_value)
-        if isinstance(value, str):
-            try:
-                hours, minutes = map(int, value.split(":"))
-                return time(hour=hours, minute=minutes)
-            except ValueError:
-                _LOGGER.error("Invalid time format for %s: %s", self._key, value)
-        return time(
-            hour=int(default_value.split(":", maxsplit=1)[0]),
-            minute=int(default_value.split(":", maxsplit=1)[1]),
-        )
+        return self.coordinator.data.get(self._key)
 
     async def async_set_value(self, value: time) -> None:
-        """Set the time value."""
-        await self.coordinator.async_update_time(self._key, value.strftime("%H:%M"))
+        """Set the time."""
+        await self.coordinator.async_set_time_value(self._key, value.isoformat())
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
+
+    @property
+    def state(self) -> str | None:
+        """Return the state of the time entity."""
+        if self.native_value is None:
+            return None
+        if isinstance(self.native_value, str):
+            return self.native_value
+        return self.native_value.isoformat()

@@ -23,21 +23,16 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
+    coordinator = DynamicPresenceCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
 
-    try:
-        coordinator = DynamicPresenceCoordinator(hass, entry)
-        await coordinator.async_config_entry_first_refresh()
-        hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        entry.async_on_unload(entry.add_update_listener(async_update_options))
-        _LOGGER.info("Successfully set up Dynamic Presence for %s", room_name)
-        return True
-    except Exception as ex:
-        _LOGGER.exception("Error setting up Dynamic Presence for %s", room_name)
-        raise ConfigEntryNotReady from ex
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
+
+    return True
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:

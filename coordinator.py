@@ -5,20 +5,18 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .active_room import ActiveRoom
 from .const import (
-    CONF_DISABLE_ON_CLEAR,
-    CONF_ENABLE,
-    CONF_ENABLE_ON_PRESENCE,
-    CONF_NIGHT_MODE_ENABLE,
-    DEFAULT_DISABLE_ON_CLEAR,
-    DEFAULT_ENABLE,
-    DEFAULT_ENABLE_ON_PRESENCE,
-    DEFAULT_NIGHT_MODE_ENABLE,
+    CONF_ROOM_NAME,
+    DEFAULT_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
+    DEFAULT_VALUES,
     DOMAIN,
     NUMBER_CONFIG,
+    SWITCH_KEYS,
 )
 from .night_mode import NightMode
 from .presence_detector import PresenceDetector
@@ -41,32 +39,25 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.presence_detector = PresenceDetector(hass, entry)
         self.night_mode = NightMode(hass, entry)
         self.active_room = ActiveRoom(hass, entry)
-        self.data = {
-            CONF_ENABLE: entry.options.get(CONF_ENABLE, DEFAULT_ENABLE),
-            CONF_NIGHT_MODE_ENABLE: entry.options.get(
-                CONF_NIGHT_MODE_ENABLE, DEFAULT_NIGHT_MODE_ENABLE
-            ),
-            CONF_ENABLE_ON_PRESENCE: entry.options.get(
-                CONF_ENABLE_ON_PRESENCE, DEFAULT_ENABLE_ON_PRESENCE
-            ),
-            CONF_DISABLE_ON_CLEAR: entry.options.get(
-                CONF_DISABLE_ON_CLEAR, DEFAULT_DISABLE_ON_CLEAR
-            ),
-        }
+        self.data = {}
 
         # Initialize number entities with default values
         for key, config in NUMBER_CONFIG.items():
             self.data[key] = entry.options.get(key, config["default"])
 
-        # Ensure switch states are preserved
-        for switch in [
-            CONF_ENABLE,
-            CONF_NIGHT_MODE_ENABLE,
-            CONF_ENABLE_ON_PRESENCE,
-            CONF_DISABLE_ON_CLEAR,
-        ]:
-            if switch not in self.data:
-                self.data[switch] = entry.options.get(switch, True)
+        # Initialize switch states
+        for switch in SWITCH_KEYS:
+            self.data[switch] = entry.options.get(
+                switch, DEFAULT_VALUES.get(switch, True)
+            )
+
+        # Initialize time entities with default values
+        self.data["night_mode_start"] = entry.options.get(
+            "night_mode_start", DEFAULT_NIGHT_MODE_START
+        )
+        self.data["night_mode_end"] = entry.options.get(
+            "night_mode_end", DEFAULT_NIGHT_MODE_END
+        )
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
@@ -74,34 +65,37 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             await self.presence_detector.update_presence()
             self.active_room.update_activity(self.presence_detector.presence_detected)
 
-            self.data.update(
-                {
-                    "presence_detected": self.presence_detector.presence_detected,
-                    "last_presence_time": self.presence_detector.last_presence_time,
-                    "is_night_mode": self.night_mode.is_night_mode_active(),
-                    "is_active_room": self.active_room.is_active,
-                    "presence_duration": self.presence_detector.get_presence_duration(),
-                    "absence_duration": self.presence_detector.get_absence_duration(),
-                    "active_room_status": "active"
-                    if self.active_room.is_active
-                    else "inactive",
-                    "presence_sensor_state": "on"
-                    if self.presence_detector.presence_detected
-                    else "off",
-                    "night_mode_status": "on"
-                    if self.night_mode.is_night_mode_active()
-                    else "off",
-                }
+            room_name = (
+                self.entry.data.get(CONF_ROOM_NAME, "Unknown Room")
+                .lower()
+                .replace(" ", "_")
             )
 
+            updated_data = {
+                f"{room_name}_occupancy_duration": self.presence_detector.get_presence_duration(),
+                f"{room_name}_absence_duration": self.presence_detector.get_absence_duration(),
+                f"{room_name}_active_room_status": "active"
+                if self.active_room.is_active
+                else "inactive",
+                f"{room_name}_occupancy_state": "occupied"
+                if self.presence_detector.presence_detected
+                else "vacant",
+                f"{room_name}_night_mode_status": "on"
+                if self.night_mode.is_night_mode_active()
+                else "off",
+            }
+
+            for key, value in updated_data.items():
+                _LOGGER.debug("Updating %s with value: %s", key, value)
+                self.data[key] = value
+
             _LOGGER.debug("Updated coordinator data: %s", self.data)
-            return self.data
         except AttributeError as e:
-            _LOGGER.error("Error updating data: %s", str(e))
-        except (ValueError, TypeError) as e:
-            _LOGGER.error("Unexpected error updating data: %s", str(e))
-        else:
-            _LOGGER.debug("Updated coordinator data: %s", self.data)
+            _LOGGER.error("AttributeError updating data: %s", str(e))
+        except ValueError as e:
+            _LOGGER.error("ValueError updating data: %s", str(e))
+        except TypeError as e:
+            _LOGGER.error("TypeError updating data: %s", str(e))
 
         return self.data
 
@@ -141,4 +135,56 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def async_update_time(self, key: str, value: str):
         """Update a time."""
         self.data[key] = value
+        self.async_set_updated_data(self.data)
+
+    def get_entity_name(self, entity_type: str, name: str) -> str:
+        """Get the entity name."""
+        room_name = (
+            self.entry.data.get(CONF_ROOM_NAME, "Unknown Room")
+            .lower()
+            .replace(" ", "_")
+        )
+        return f"{entity_type}.{room_name}_{name.lower().replace(' ', '_')}"
+
+    def register_entity(
+        self, entity: Entity, room: str, entity_type: str, specific_name: str
+    ):
+        """Register an entity."""
+        entity_name = self.get_entity_name(room, entity_type, specific_name)
+        self._entities[entity_name] = entity
+
+    def update_entity_state(
+        self, room: str, entity_type: str, specific_name: str, new_state
+    ):
+        """Update an entity state."""
+        entity_name = self.get_entity_name(room, entity_type, specific_name)
+        if entity_name in self._entities:
+            self._entities[entity_name].async_write_ha_state()
+
+    def get_device_info(self, room: str) -> dict:
+        """Return device info for the given room."""
+        return {
+            "identifiers": {(DOMAIN, self.entry.entry_id)},
+            "name": f"Dynamic Presence {room.capitalize()}",
+            "manufacturer": "Custom",
+            "model": "Dynamic Presence",
+            "sw_version": "1.0",
+        }
+
+    async def async_set_number_value(self, key: str, value: float):
+        """Update a number value."""
+        self.data[key] = value
+        await self.async_update_number(key, value)
+        self.async_set_updated_data(self.data)
+
+    async def async_set_switch_value(self, key: str, value: bool):
+        """Update a switch value."""
+        self.data[key] = value
+        await self.async_update_switch(key, value)
+        self.async_set_updated_data(self.data)
+
+    async def async_set_time_value(self, key: str, value: str):
+        """Update a time value."""
+        self.data[key] = value
+        await self.async_update_time(key, value)
         self.async_set_updated_data(self.data)

@@ -9,8 +9,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.const import UnitOfTime
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_ROOM_NAME
+from .const import (
+    DOMAIN,
+    CONF_ROOM_NAME,
+    SENSOR_KEYS,
+)
 from .coordinator import DynamicPresenceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,73 +25,54 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Dynamic Presence sensor based on a config entry."""
-    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
-    _LOGGER.info("Setting up Dynamic Presence sensors for %s", room_name)
-
+    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
     sensors = [
         DynamicPresenceSensor(
-            coordinator, "presence_duration", "Presence Duration", UnitOfTime.SECONDS
-        ),
-        DynamicPresenceSensor(
-            coordinator, "absence_duration", "Absence Duration", UnitOfTime.SECONDS
-        ),
-        DynamicPresenceSensor(
-            coordinator, "active_room_status", "Active Room Status", None
-        ),
-        DynamicPresenceSensor(
-            coordinator, "presence_sensor_state", "Presence Sensor State", None
-        ),
-        DynamicPresenceSensor(
-            coordinator, "night_mode_status", "Night Mode Status", None
-        ),
+            coordinator,
+            room_name,
+            key,
+            key.replace("_", " ").title(),
+            UnitOfTime.SECONDS if "duration" in key else None,
+        )
+        for key in SENSOR_KEYS
     ]
 
     async_add_entities(sensors)
     _LOGGER.debug("Added %d Dynamic Presence sensors for %s", len(sensors), room_name)
 
 
-class DynamicPresenceSensor(SensorEntity):
+class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Dynamic Presence sensor."""
 
     def __init__(
         self,
         coordinator: DynamicPresenceCoordinator,
+        room: str,
         key: str,
         name: str,
         unit: str | None,
     ) -> None:
-        """Initialize the sensor."""
-        self.coordinator = coordinator
-        self._key = key
-        self._attr_name = f"Dynamic Presence {name}"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+        """Initialize the Dynamic Presence sensor."""
+        super().__init__(coordinator)
+        self._key = f"{room}_{key}"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{self._key}"
+        self._attr_has_entity_name = True
+        self._attr_name = name
+        self.entity_id = f"sensor.dynamic_presence_{self._key}"
         self._attr_native_unit_of_measurement = unit
-        self._attr_device_class = SensorStateClass.MEASUREMENT
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.entry.entry_id)},
-            "name": f"Dynamic Presence {coordinator.entry.data.get(CONF_ROOM_NAME, 'Unknown Room')}",
-            "manufacturer": "Custom",
-            "model": "Dynamic Presence",
-        }
+        self._attr_device_info = coordinator.get_device_info(room)
+        _LOGGER.debug("Initialized sensor: %s with key: %s", self.entity_id, self._key)
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
         value = self.coordinator.data.get(self._key)
-        _LOGGER.debug(f"Sensor {self._attr_name} value: {value}")
-        if value is None:
-            _LOGGER.warning(f"Sensor {self._attr_name} has no value in coordinator data")
+        _LOGGER.debug("Sensor %s returning value: %s", self.entity_id, value)
         return value
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
-        )
-
-    async def async_update(self):
-        """Update the entity."""
-        await self.coordinator.async_request_refresh()
-
+        await super().async_added_to_hass()
+        _LOGGER.debug("Sensor %s added to hass", self.entity_id)
