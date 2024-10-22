@@ -118,21 +118,16 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        _LOGGER.info("DynamicPresenceOptionsFlowHandler.async_step_init called")
         if user_input is not None:
-            _LOGGER.debug(
-                "Updating presence sensor to: %s", user_input[CONF_PRESENCE_SENSOR]
-            )
+            _LOGGER.info("Updating options with user input: %s", user_input)
             self.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data={
-                    **self.config_entry.data,
-                    CONF_PRESENCE_SENSOR: user_input[CONF_PRESENCE_SENSOR],
-                },
-                options=user_input,
+                self.config_entry, options=user_input
             )
             return self.async_create_entry(title="", data=user_input)
 
         options = {**self.config_entry.data, **self.config_entry.options}
+        _LOGGER.info("Current options: %s", options)
         data_schema = vol.Schema(
             {
                 vol.Required(

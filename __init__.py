@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_PRESENCE_SENSOR, CONF_ROOM_NAME, DOMAIN
+from .const import CONF_ROOM_NAME, DOMAIN
 from .coordinator import DynamicPresenceCoordinator
 
 PLATFORMS: list[Platform] = [
@@ -23,10 +23,8 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
-    _LOGGER.debug(
-        "Setting up Dynamic Presence with presence sensor: %s",
-        entry.data[CONF_PRESENCE_SENSOR],
-    )
+    _LOGGER.info("Setting up Dynamic Presence with entry: %s", entry.as_dict())
+    _LOGGER.info("Current options: %s", entry.options)
 
     coordinator = DynamicPresenceCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
@@ -35,11 +33,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
+    _LOGGER.info("Dynamic Presence setup completed")
     return True
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options for a config entry."""
+    """Update options."""
+    _LOGGER.info("Updating options: %s", entry.options)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.update_data_from_options(entry.options)
+    await coordinator.async_request_refresh()
+
+    # Reload the config entry
     await hass.config_entries.async_reload(entry.entry_id)
 
 

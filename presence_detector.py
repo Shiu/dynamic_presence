@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_CONTROLLED_ENTITIES,
     CONF_MANAGE_ON_CLEAR,
     CONF_MANAGE_ON_PRESENCE,
@@ -45,6 +46,9 @@ class PresenceDetector:
         self.presence_detected = False
         self.grace_period = timedelta(seconds=15)
         self.last_absence_start = None
+        self.active_room_threshold = entry.options.get(
+            CONF_ACTIVE_ROOM_THRESHOLD, 300
+        )  # Default to 5 minutes
 
     async def update_presence(self):
         """Update the presence state based on the presence sensor."""
@@ -59,7 +63,7 @@ class PresenceDetector:
         if new_presence:
             if not self.presence_detected:
                 self.last_presence_time = current_time
-                _LOGGER.info("New occupancy detected")
+                _LOGGER.debug("New occupancy detected")
             self.presence_detected = True
             self.last_absence_start = None
         elif self.presence_detected:
@@ -69,7 +73,7 @@ class PresenceDetector:
             elif (current_time - self.last_absence_start) >= self.grace_period:
                 self.presence_detected = False
                 self.last_absence_time = self.last_absence_start
-                _LOGGER.info("Absence confirmed after grace period")
+                _LOGGER.debug("Absence confirmed after grace period")
 
         if self.presence_detected:
             occupancy_duration = (
@@ -78,6 +82,27 @@ class PresenceDetector:
                 else 0
             )
             absence_duration = 0
+
+            _LOGGER.debug(
+                "Occupancy duration: %s, Threshold: %s",
+                occupancy_duration,
+                self.active_room_threshold,
+            )
+
+            if occupancy_duration >= self.active_room_threshold:
+                _LOGGER.debug(
+                    "Occupancy duration %s reached threshold %s",
+                    occupancy_duration,
+                    self.active_room_threshold,
+                )
+                await self.coordinator.set_active_room_status(True)
+            else:
+                _LOGGER.debug(
+                    "Occupancy duration %s not yet reached threshold %s",
+                    occupancy_duration,
+                    self.active_room_threshold,
+                )
+                await self.coordinator.set_active_room_status(False)
         else:
             occupancy_duration = 0
             absence_duration = (
@@ -85,6 +110,7 @@ class PresenceDetector:
                 if self.last_absence_time
                 else 0
             )
+            await self.coordinator.set_active_room_status(False)
 
         self.coordinator.data.update(
             {
@@ -94,6 +120,11 @@ class PresenceDetector:
                 f"{self.coordinator.room_name}_occupancy_duration": occupancy_duration,
                 f"{self.coordinator.room_name}_absence_duration": absence_duration,
             }
+        )
+
+        _LOGGER.debug(
+            "Updated coordinator data: %s",
+            self.coordinator.data,
         )
 
         await self.update_controlled_entities()
@@ -144,3 +175,20 @@ class PresenceDetector:
                 _LOGGER.error(
                     "Error updating controlled entity %s: %s", entity_id, str(e)
                 )
+
+    async def set_room_active(self):
+        """Set the room as active."""
+        if not self.coordinator.active_room.is_active:
+            self.coordinator.active_room.set_active(True)
+            _LOGGER.debug("Room %s set as active", self.coordinator.room_name)
+            await self.coordinator.async_update_listeners()
+
+    def update_from_options(self, options: dict):
+        """Update detector values from new options."""
+        self.presence_timeout = options.get(
+            CONF_PRESENCE_TIMEOUT, self.presence_timeout
+        )
+        self.active_room_threshold = options.get(
+            CONF_ACTIVE_ROOM_THRESHOLD, self.active_room_threshold
+        )
+        # Add any other options that need to be updated

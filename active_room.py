@@ -1,60 +1,68 @@
-"""Active room module for Dynamic Presence integration.
+"""Active Room module for Dynamic Presence integration.
 
 This module contains the ActiveRoom class, which manages the active room status.
 It handles activity timeouts, thresholds, and provides methods to update
 the active room status based on presence detection and configured settings.
 """
 
-from datetime import datetime
 import logging
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_ACTIVE_ROOM_THRESHOLD, CONF_ACTIVE_ROOM_TIMEOUT
+from .const import (
+    CONF_ACTIVE_ROOM_THRESHOLD,
+    CONF_ACTIVE_ROOM_TIMEOUT,
+    DEFAULT_ACTIVE_ROOM_THRESHOLD,
+    DEFAULT_ACTIVE_ROOM_TIMEOUT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class ActiveRoom:
-    """Manage the active room status for Dynamic Presence integration."""
+    """Class to manage the active room state."""
 
-    def __init__(self, hass: HomeAssistant, config_entry) -> None:
-        """Initialize the ActiveRoom instance.
-
-        Args:
-            hass: The Home Assistant instance.
-            config_entry: The config entry containing the integration options.
-
-        """
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the ActiveRoom class."""
         self.hass = hass
-        self.active_room_timeout = config_entry.options.get(
-            CONF_ACTIVE_ROOM_TIMEOUT, 600
-        )
-        self.active_room_threshold = config_entry.options.get(
-            CONF_ACTIVE_ROOM_THRESHOLD, 900
-        )
-        self.last_activity_time = None
+        self.entry = entry
         self.is_active = False
+        self.active_room_timeout = entry.options.get(
+            CONF_ACTIVE_ROOM_TIMEOUT, DEFAULT_ACTIVE_ROOM_TIMEOUT
+        )
+        self.active_room_threshold = entry.options.get(
+            CONF_ACTIVE_ROOM_THRESHOLD, DEFAULT_ACTIVE_ROOM_THRESHOLD
+        )
 
-    def update_activity(self, presence_detected: bool):
+    def set_active(self, active: bool):
+        """Set the active room status."""
+        self.is_active = active
+        return self.is_active
+
+    def update_activity(self, occupancy_duration: int):
         """Update the active room status based on presence detection."""
-        current_time = datetime.now()
-        if presence_detected:
-            if (
-                self.last_activity_time is None
-                or (current_time - self.last_activity_time).total_seconds()
-                > self.active_room_threshold
-            ):
-                self.is_active = True
-            self.last_activity_time = current_time
-        elif self.last_activity_time:
-            time_since_last_activity = (
-                current_time - self.last_activity_time
-            ).total_seconds()
-            if time_since_last_activity > self.active_room_timeout:
-                self.is_active = False
+        if occupancy_duration >= self.active_room_threshold:
+            if not self.is_active:
+                self.set_active(True)
+                _LOGGER.info("Room set as active")
+        elif self.is_active:
+            self.set_active(False)
+            _LOGGER.info("Room set as inactive")
 
     def update_settings(self, timeout: int, threshold: int):
         """Update active room settings."""
         self.active_room_timeout = timeout
         self.active_room_threshold = threshold
+
+    def get_active(self) -> bool:
+        """Get the current active state of the room."""
+        return self.is_active
+
+    def get_timeout(self) -> int:
+        """Get the active room timeout value."""
+        return self.active_room_timeout
+
+    def get_threshold(self) -> int:
+        """Get the active room threshold value."""
+        return self.active_room_threshold

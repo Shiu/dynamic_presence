@@ -55,13 +55,27 @@ class DynamicPresenceNumber(NumberEntity):
             return int(value)
         return value
 
+    def set_native_value(self, value: float) -> None:
+        """Set new value."""
+        self.coordinator.data[self.entity_description.key] = value
+        self.coordinator.async_set_updated_data(self.coordinator.data)
+
     async def async_set_native_value(self, value: float) -> None:
-        """Set the new value."""
+        """Set new value."""
         if isinstance(value, float) and value.is_integer():
             value = int(value)
-        await self.coordinator.async_set_number_value(
-            self.entity_description.key, value
-        )
+        self.set_native_value(value)
+
+        # Update the config entry options
+        entry = self.coordinator.entry
+        new_options = dict(entry.options)
+        new_options[self.entity_description.key] = value
+        self.hass.config_entries.async_update_entry(entry, options=new_options)
+
+        # Trigger the options update
+        await self.coordinator.hass.config_entries.async_reload(entry.entry_id)
+
+        _LOGGER.info("Updated %s to %s", self.entity_description.key, value)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""

@@ -19,12 +19,11 @@ from .const import (
     CONF_ROOM_NAME,
     DEFAULT_NIGHT_MODE_END,
     DEFAULT_NIGHT_MODE_START,
-    DEFAULT_VALUES,
     DOMAIN,
     NUMBER_CONFIG,
     SWITCH_KEYS,
+    TIME_KEYS,
 )
-from .night_mode import NightMode
 from .presence_detector import PresenceDetector
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,45 +37,44 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=1),  # Update every second
+            name="Dynamic Presence",
+            update_interval=timedelta(seconds=1),
         )
         self.entry = entry
-        self.presence_detector = PresenceDetector(hass, entry, self)
-        self.night_mode = NightMode(hass, entry)
+        self.room_name = (
+            entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
+        )
         self.active_room = ActiveRoom(hass, entry)
         self.data = {}
 
-        # Initialize number entities with default values
-        for key, config in NUMBER_CONFIG.items():
-            self.data[key] = entry.options.get(key, config["default"])
-
-        # Initialize switch states
-        for switch in SWITCH_KEYS:
-            self.data[switch] = entry.options.get(
-                switch, DEFAULT_VALUES.get(switch, True)
-            )
-
-        # Initialize time entities with default values
-        self.data["night_mode_start"] = entry.options.get(
-            "night_mode_start", DEFAULT_NIGHT_MODE_START
-        )
-        self.data["night_mode_end"] = entry.options.get(
-            "night_mode_end", DEFAULT_NIGHT_MODE_END
-        )
+        _LOGGER.info("Initializing coordinator with options: %s", entry.options)
+        self.update_data_from_options(entry.options)
 
         # Set up event listener for presence sensor
         self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
-        self.room_name = (
-            entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
-        )
+        self.presence_detector = PresenceDetector(hass, entry, self)
+        _LOGGER.info("Coordinator initialization completed")
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         await self.presence_detector.update_presence()
         return self.data
+
+    async def set_active_room_status(self, active: bool):
+        """Set the active room status and update listeners."""
+        previous_status = self.active_room.get_active()
+        self.active_room.set_active(active)
+        self.data[f"{self.room_name}_active_room_status"] = active
+        if previous_status != active:
+            _LOGGER.info(
+                "Active room status changed from %s to %s", previous_status, active
+            )
+        else:
+            _LOGGER.debug("Active room status unchanged: %s", active)
+        _LOGGER.debug("Updated coordinator data: %s", self.data)
+        self.async_set_updated_data(self.data)
 
     async def async_update_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""
@@ -150,11 +148,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             "sw_version": "1.0",
         }
 
-    async def async_set_number_value(self, key: str, value: float):
-        """Update a number value."""
+    async def async_set_number_value(self, key: str, value: float) -> None:
+        """Set a number value and update data."""
         self.data[key] = value
-        await self.async_update_number(key, value)
-        self.async_set_updated_data(self.data)
+        _LOGGER.info("Coordinator: Updated %s to %s", key, value)
+        await self.async_request_refresh()
 
     async def async_set_switch_value(self, key: str, value: bool):
         """Update a switch value."""
@@ -201,3 +199,20 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 _LOGGER.error(
                     "Error updating controlled entity %s: %s", entity_id, str(e)
                 )
+
+    def update_data_from_options(self, options: dict):
+        """Update coordinator data from options."""
+        _LOGGER.info("Updating coordinator data from options: %s", options)
+        for key in TIME_KEYS:
+            self.data[key] = options.get(key)
+        for key, config in NUMBER_CONFIG.items():
+            self.data[key] = options.get(key, config["default"])
+        for key in SWITCH_KEYS:
+            self.data[key] = options.get(key)
+        self.data["night_mode_start"] = options.get(
+            "night_mode_start", DEFAULT_NIGHT_MODE_START
+        )
+        self.data["night_mode_end"] = options.get(
+            "night_mode_end", DEFAULT_NIGHT_MODE_END
+        )
+        _LOGGER.info("Updated coordinator data: %s", self.data)

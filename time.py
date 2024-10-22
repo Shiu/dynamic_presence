@@ -14,29 +14,6 @@ from .coordinator import DynamicPresenceCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
-    """Set up Dynamic Presence time entities based on a config entry."""
-    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-
-    time_entities = [
-        DynamicPresenceTime(
-            coordinator,
-            room_name,
-            TimeEntityDescription(
-                key=key,
-                name=key.replace("_", " ").title(),
-            ),
-        )
-        for key in TIME_KEYS
-    ]
-
-    async_add_entities(time_entities)
-    _LOGGER.debug("Added %d time entities for %s", len(time_entities), room_name)
-
-
 class DynamicPresenceTime(TimeEntity):
     """Representation of a Dynamic Presence time setting."""
 
@@ -64,7 +41,19 @@ class DynamicPresenceTime(TimeEntity):
 
     async def async_set_value(self, value: time) -> None:
         """Set the time."""
-        await self.coordinator.async_set_time_value(self._key, value.isoformat())
+        time_str = value.isoformat()
+        self.coordinator.data[self._key] = time_str
+        self.coordinator.async_set_updated_data(self.coordinator.data)
+
+        # Update the config entry options
+        entry = self.coordinator.entry
+        new_options = dict(entry.options)
+        new_options[self._key] = time_str
+        self.coordinator.hass.config_entries.async_update_entry(
+            entry, options=new_options
+        )
+
+        _LOGGER.debug("Updated %s to %s", self._key, time_str)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
@@ -80,3 +69,26 @@ class DynamicPresenceTime(TimeEntity):
         if isinstance(self.native_value, str):
             return self.native_value
         return self.native_value.isoformat()
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up Dynamic Presence time entities based on a config entry."""
+    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    time_entities = [
+        DynamicPresenceTime(
+            coordinator,
+            room_name,
+            TimeEntityDescription(
+                key=key,
+                name=key.replace("_", " ").title(),
+            ),
+        )
+        for key in TIME_KEYS
+    ]
+
+    async_add_entities(time_entities)
+    _LOGGER.debug("Added %d time entities for %s", len(time_entities), room_name)

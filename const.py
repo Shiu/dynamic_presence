@@ -5,6 +5,10 @@ DOMAIN = "dynamic_presence"
 CONF_ROOM_NAME = "room_name"
 CONF_PRESENCE_SENSOR = "presence_sensor"
 CONF_PRESENCE_TIMEOUT = "presence_timeout"
+CONF_CONTROLLED_ENTITIES = "controlled_entities"
+CONF_ENABLE = "enable"
+CONF_MANAGE_ON_CLEAR = "manage_on_clear"
+CONF_MANAGE_ON_PRESENCE = "manage_on_presence"
 CONF_ACTIVE_ROOM_THRESHOLD = "active_room_threshold"
 CONF_ACTIVE_ROOM_TIMEOUT = "active_room_timeout"
 CONF_NIGHT_MODE_TIMEOUT = "night_mode_timeout"
@@ -12,10 +16,6 @@ CONF_NIGHT_MODE_SCALE = "night_mode_scale"
 CONF_NIGHT_MODE_ENABLE = "night_mode_enable"
 CONF_NIGHT_MODE_START = "night_mode_start"
 CONF_NIGHT_MODE_END = "night_mode_end"
-CONF_CONTROLLED_ENTITIES = "controlled_entities"
-CONF_ENABLE = "enable"
-CONF_MANAGE_ON_CLEAR = "manage_on_clear"
-CONF_MANAGE_ON_PRESENCE = "manage_on_presence"
 
 DEFAULT_PRESENCE_TIMEOUT = 300
 DEFAULT_ACTIVE_ROOM_THRESHOLD = 600
@@ -91,10 +91,3 @@ SENSOR_KEYS = [
     "occupancy_duration",
     "occupancy_state",
 ]
-
-DEFAULT_VALUES = {
-    CONF_MANAGE_ON_CLEAR: DEFAULT_MANAGE_ON_CLEAR,
-    CONF_MANAGE_ON_PRESENCE: DEFAULT_MANAGE_ON_PRESENCE,
-    CONF_ENABLE: DEFAULT_ENABLE,
-    CONF_NIGHT_MODE_ENABLE: DEFAULT_NIGHT_MODE_ENABLE,
-}
