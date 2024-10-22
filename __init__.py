@@ -45,7 +45,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await coordinator.async_request_refresh()
 
     # Reload the config entry
-    await hass.config_entries.async_reload(entry.entry_id)
+    for entity in coordinator.entities.values():
+        if hasattr(entity, "async_update_config"):
+            await entity.async_update_config(entry.options)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

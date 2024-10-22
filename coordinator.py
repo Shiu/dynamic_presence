@@ -59,7 +59,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
+        current_occupancy_duration = self.data.get("occupancy_duration", 0)
         await self.presence_detector.update_presence()
+        self.data["occupancy_duration"] = current_occupancy_duration
         return self.data
 
     async def set_active_room_status(self, active: bool):
@@ -152,18 +154,16 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Set a number value and update data."""
         self.data[key] = value
         _LOGGER.info("Coordinator: Updated %s to %s", key, value)
-        await self.async_request_refresh()
+        self.async_set_updated_data(self.data)
 
     async def async_set_switch_value(self, key: str, value: bool):
         """Update a switch value."""
         self.data[key] = value
-        await self.async_update_switch(key, value)
         self.async_set_updated_data(self.data)
 
     async def async_set_time_value(self, key: str, value: str):
         """Update a time value."""
         self.data[key] = value
-        await self.async_update_time(key, value)
         self.async_set_updated_data(self.data)
 
     async def _handle_state_change(self, event):

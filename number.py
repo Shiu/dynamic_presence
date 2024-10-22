@@ -83,6 +83,12 @@ class DynamicPresenceNumber(NumberEntity):
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
 
+    async def async_update_config(self, options: dict) -> None:
+        """Update the entity's configuration."""
+        if self._attr_native_value != options.get(self.entity_description.key):
+            self._attr_native_value = options.get(self.entity_description.key)
+            self.async_write_ha_state()
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
