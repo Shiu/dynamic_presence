@@ -29,25 +29,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = DynamicPresenceCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await coordinator.presence_detector.start_timer()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     _LOGGER.info("Dynamic Presence setup completed")
     return True
-
-
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options."""
-    _LOGGER.info("Updating options: %s", entry.options)
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.update_data_from_options(entry.options)
-    await coordinator.async_request_refresh()
-
-    # Reload the config entry
-    for entity in coordinator.entities.values():
-        if hasattr(entity, "async_update_config"):
-            await entity.async_update_config(entry.options)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -55,7 +42,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room")
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        await coordinator.presence_detector.stop_timer()
     _LOGGER.info("Unloaded Dynamic Presence for %s", room_name)
     return unload_ok
 
