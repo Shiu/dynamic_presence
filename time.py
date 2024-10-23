@@ -39,38 +39,21 @@ class DynamicPresenceTime(TimeEntity):
         """Return the time value."""
         return self.coordinator.data.get(self._key)
 
-    async def _async_update_time_state(
-        self, value: time, update_options: bool = True
-    ) -> None:
-        """Update time state and persist changes if needed."""
+    async def async_set_value(self, value: time) -> None:
+        """Set the time."""
         time_str = value.isoformat()
         self.coordinator.data[self._key] = time_str
         self.coordinator.async_set_updated_data(self.coordinator.data)
 
-        if update_options:
-            # Update the config entry options
-            entry = self.coordinator.entry
-            new_options = dict(entry.options)
-            new_options[self._key] = time_str
-            self.coordinator.hass.config_entries.async_update_entry(
-                entry, options=new_options
-            )
-
-        _LOGGER.info("Updated %s to %s", self._key, time_str)
-
-    async def async_set_value(self, value: str) -> None:
-        """Update the current value."""
-        await self.coordinator.async_update_entity_value(
-            self.entity_description.key, value
+        # Update the config entry options
+        entry = self.coordinator.entry
+        new_options = dict(entry.options)
+        new_options[self._key] = time_str
+        self.coordinator.hass.config_entries.async_update_entry(
+            entry, options=new_options
         )
 
-    async def async_update_config(self, options: dict) -> None:
-        """Update the entity's configuration."""
-        new_value = options.get(self._key)
-        if self.native_value != new_value:
-            await self._async_update_time_state(
-                time.fromisoformat(new_value), update_options=False
-            )
+        _LOGGER.debug("Updated %s to %s", self._key, time_str)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""

@@ -1,22 +1,24 @@
 """Coordinator for Dynamic Presence integration."""
 
+from datetime import timedelta
 import logging
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .active_room import ActiveRoom
 from .const import (
+    CONF_CONTROLLED_ENTITIES,
+    CONF_MANAGE_ON_CLEAR,
+    CONF_MANAGE_ON_PRESENCE,
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
-    DEFAULT_ACTIVE_ROOM_THRESHOLD,
-    DEFAULT_ACTIVE_ROOM_TIMEOUT,
     DEFAULT_NIGHT_MODE_END,
     DEFAULT_NIGHT_MODE_START,
-    DEFAULT_SWITCH_STATES,
     DOMAIN,
     NUMBER_CONFIG,
     SWITCH_KEYS,
@@ -27,7 +29,7 @@ from .presence_detector import PresenceDetector
 _LOGGER = logging.getLogger(__name__)
 
 
-class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+class DynamicPresenceCoordinator(DataUpdateCoordinator):
     """Coordinate between Dynamic Presence components."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -36,60 +38,36 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass,
             _LOGGER,
             name="Dynamic Presence",
+            update_interval=timedelta(seconds=1),
         )
-        self.entry: ConfigEntry = entry
-        self.room_name: str = (
+        self.entry = entry
+        self.room_name = (
             entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
         )
-        self.data: dict[str, Any] = {}
-        self.last_update: float | None = None
-        self.presence_detected: bool = False
-        self.is_active_room: bool = False
-        self.active_room_timeout: int = entry.options.get(
-            "active_room_timeout", DEFAULT_ACTIVE_ROOM_TIMEOUT
-        )
-        self.active_room_threshold: int = entry.options.get(
-            "active_room_threshold", DEFAULT_ACTIVE_ROOM_THRESHOLD
-        )
-        self.data["occupancy_duration"] = 0
-        self.data["absence_duration"] = 0
+        self.active_room = ActiveRoom(hass, entry)
+        self.data = {}
 
         _LOGGER.info("Initializing coordinator with options: %s", entry.options)
         self.update_data_from_options(entry.options)
 
-        # Initialize switch states
-        for switch_key in SWITCH_KEYS:
-            self.data[switch_key] = entry.options.get(
-                switch_key, DEFAULT_SWITCH_STATES[switch_key]
-            )
-
         # Set up event listener for presence sensor
-        self.presence_sensor: str = entry.data[CONF_PRESENCE_SENSOR]
-
-        self.presence_detector: PresenceDetector = PresenceDetector(hass, entry, self)
+        self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
+        self.presence_detector = PresenceDetector(hass, entry, self)
+        _LOGGER.info("Coordinator initialization completed")
+
     async def _async_update_data(self):
-        """Update timers."""
-        now = self.hass.loop.time()
-        if self.last_update is None:
-            self.last_update = now
-            return self.data
-
-        time_elapsed = now - self.last_update
-        self.last_update = now
-
-        if self.presence_detected:
-            self.data["occupancy_duration"] += time_elapsed
-        else:
-            self.data["absence_duration"] += time_elapsed
-
+        """Fetch data from API endpoint."""
+        current_occupancy_duration = self.data.get("occupancy_duration", 0)
+        await self.presence_detector.update_presence()
+        self.data["occupancy_duration"] = current_occupancy_duration
         return self.data
 
     async def set_active_room_status(self, active: bool):
         """Set the active room status and update listeners."""
-        previous_status = self.is_active_room
-        self.is_active_room = active
+        previous_status = self.active_room.get_active()
+        self.active_room.set_active(active)
         self.data[f"{self.room_name}_active_room_status"] = active
         if previous_status != active:
             _LOGGER.info(
@@ -118,8 +96,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_update_active_room_settings(self, timeout: int, threshold: int):
         """Update active room settings."""
-        self.active_room_timeout = timeout
-        self.active_room_threshold = threshold
+        self.active_room.update_settings(timeout, threshold)
         self.data["active_room_timeout"] = timeout
         self.data["active_room_threshold"] = threshold
         self.async_set_updated_data(self.data)
@@ -166,36 +143,28 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def get_device_info(self, room: str) -> dict:
         """Return device info for the given room."""
         return {
-            "identifiers": {(DOMAIN, f"{self.entry.entry_id}_{room}")},
+            "identifiers": {(DOMAIN, self.entry.entry_id)},
             "name": f"Dynamic Presence {room.capitalize()}",
             "manufacturer": "Custom",
             "model": "Dynamic Presence",
             "sw_version": "1.0",
         }
 
-    async def async_update_entity_value(self, key: str, value: Any) -> None:
-        """Update an entity value and refresh data."""
-        self.data[key] = value
-        _LOGGER.info("Coordinator: Updated %s to %s", key, value)
-
-        # Update the config entry options
-        new_options = dict(self.entry.options)
-        new_options[key] = value
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
-
-        self.async_set_updated_data(self.data)
-
     async def async_set_number_value(self, key: str, value: float) -> None:
         """Set a number value and update data."""
-        await self.async_update_entity_value(key, value)
+        self.data[key] = value
+        _LOGGER.info("Coordinator: Updated %s to %s", key, value)
+        self.async_set_updated_data(self.data)
 
-    async def async_set_switch_value(self, key: str, value: bool) -> None:
+    async def async_set_switch_value(self, key: str, value: bool):
         """Update a switch value."""
-        await self.async_update_entity_value(key, value)
+        self.data[key] = value
+        self.async_set_updated_data(self.data)
 
-    async def async_set_time_value(self, key: str, value: str) -> None:
+    async def async_set_time_value(self, key: str, value: str):
         """Update a time value."""
-        await self.async_update_entity_value(key, value)
+        self.data[key] = value
+        self.async_set_updated_data(self.data)
 
     async def _handle_state_change(self, event):
         """Handle state changes for the presence sensor."""
@@ -203,17 +172,36 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.hass.states.get(self.presence_sensor) is None:
                 _LOGGER.warning("Presence sensor %s not found", self.presence_sensor)
                 return
-            await self.presence_detector.update_presence()
-            await self.async_request_refresh()
+            await self.async_refresh()
 
     async def async_refresh(self):
         """Refresh data from the presence detector."""
         await self._async_update_data()
         self.async_set_updated_data(self.data)
 
+    async def update_controlled_entities(self):
+        """Update controlled entities based on presence state."""
+        controlled_entities = self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
+        manage_on_presence = self.entry.options.get(CONF_MANAGE_ON_PRESENCE, True)
+        manage_on_clear = self.entry.options.get(CONF_MANAGE_ON_CLEAR, True)
+
+        for entity_id in controlled_entities:
+            try:
+                if self.presence_detected and manage_on_presence:
+                    await self.hass.services.async_call(
+                        "homeassistant", "turn_on", {"entity_id": entity_id}
+                    )
+                elif not self.presence_detected and manage_on_clear:
+                    await self.hass.services.async_call(
+                        "homeassistant", "turn_off", {"entity_id": entity_id}
+                    )
+            except HomeAssistantError as e:
+                _LOGGER.error(
+                    "Error updating controlled entity %s: %s", entity_id, str(e)
+                )
+
     def update_data_from_options(self, options: dict):
         """Update coordinator data from options."""
-        current_occupancy_duration = self.data.get("occupancy_duration", 0)
         _LOGGER.info("Updating coordinator data from options: %s", options)
         for key in TIME_KEYS:
             self.data[key] = options.get(key)
@@ -227,15 +215,4 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.data["night_mode_end"] = options.get(
             "night_mode_end", DEFAULT_NIGHT_MODE_END
         )
-        self.data["occupancy_duration"] = current_occupancy_duration
         _LOGGER.info("Updated coordinator data: %s", self.data)
-
-    async def async_update_options(self, options: dict) -> None:
-        """Update options and refresh data."""
-        self.update_data_from_options(options)
-        await self.async_request_refresh()
-
-        # Update individual entities
-        for entity in self.entities.values():
-            if hasattr(entity, "async_update_config"):
-                await entity.async_update_config(options)
