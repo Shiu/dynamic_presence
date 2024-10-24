@@ -10,10 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_ROOM_NAME, DOMAIN, SWITCH_KEYS
+from .const import CONF_ROOM_NAME, DOMAIN, SWITCH_DEFAULT_STATES, SWITCH_KEYS
 from .coordinator import DynamicPresenceCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+logSwitch = logging.getLogger("dynamic_presence.switch")
 
 
 class DynamicPresenceSwitch(SwitchEntity):
@@ -32,11 +32,13 @@ class DynamicPresenceSwitch(SwitchEntity):
         self._attr_name = switch_key.replace("_", " ").title()
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{switch_key}"
         self._attr_device_info = coordinator.get_device_info(room)
+        self._default_state = SWITCH_DEFAULT_STATES.get(switch_key, False)
+        self._attr_is_on = coordinator.data.get(switch_key, self._default_state)
 
     @property
     def is_on(self) -> bool:
         """Return true if the switch is on."""
-        return self.coordinator.data.get(self._switch_key, False)
+        return self.coordinator.data.get(self._switch_key, self._default_state)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
@@ -51,7 +53,6 @@ class DynamicPresenceSwitch(SwitchEntity):
         self.coordinator.data[self._switch_key] = state
         self.coordinator.async_set_updated_data(self.coordinator.data)
 
-        # Update the config entry options
         entry = self.coordinator.entry
         new_options = dict(entry.options)
         new_options[self._switch_key] = state
@@ -59,13 +60,17 @@ class DynamicPresenceSwitch(SwitchEntity):
             entry, options=new_options
         )
 
-        _LOGGER.info("Updated %s to %s", self._switch_key, state)
-
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
+
+    async def async_update_config(self, options: dict) -> None:
+        """Update the entity's configuration."""
+        if self._switch_key in options:
+            self._attr_is_on = options[self._switch_key]
+            self.async_write_ha_state()
 
 
 async def async_setup_entry(
@@ -77,18 +82,30 @@ async def async_setup_entry(
 
     entities = []
     for switch_key in SWITCH_KEYS:
+        default_state = SWITCH_DEFAULT_STATES.get(switch_key, False)
+
+        if switch_key not in entry.options:
+            coordinator.data[switch_key] = default_state
+            logSwitch.debug(
+                "Switch %s set to default state %s",
+                switch_key,
+                coordinator.data[switch_key],
+            )
+        else:
+            coordinator.data[switch_key] = entry.options[switch_key]
+            logSwitch.debug(
+                "Switch %s set to option state %s -second",
+                switch_key,
+                coordinator.data[switch_key],
+            )
         entity = DynamicPresenceSwitch(
             coordinator,
             room_name,
             switch_key,
         )
         entities.append(entity)
-        _LOGGER.debug("Created switch entity: %s", entity.entity_id)
 
     async_add_entities(entities)
-    _LOGGER.info(
-        "Added %d Dynamic Presence switch entities for %s", len(entities), room_name
-    )
 
 
 class ManageOnClearSwitch(SwitchEntity):

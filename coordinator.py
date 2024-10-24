@@ -26,7 +26,22 @@ from .const import (
 )
 from .presence_detector import PresenceDetector
 
-_LOGGER = logging.getLogger(__name__)
+
+class MessageFilter(logging.Filter):
+    """Filter out specific messages."""
+
+    def __init__(self, *phrases) -> None:
+        """Initialize the filter."""
+        super().__init__()
+        self.phrases = phrases
+
+    def filter(self, record) -> bool:
+        """Filter out specific messages."""
+        return not any(phrase in record.msg for phrase in self.phrases)
+
+
+logCoordinator = logging.getLogger("dynamic_presence.coordinator")
+logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
 
 
 class DynamicPresenceCoordinator(DataUpdateCoordinator):
@@ -36,8 +51,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         super().__init__(
             hass,
-            _LOGGER,
             name="Dynamic Presence",
+            logger=logCoordinator,
             update_interval=timedelta(seconds=1),
         )
         self.entry = entry
@@ -47,7 +62,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.active_room = ActiveRoom(hass, entry)
         self.data = {}
 
-        _LOGGER.info("Initializing coordinator with options: %s", entry.options)
         self.update_data_from_options(entry.options)
 
         # Set up event listener for presence sensor
@@ -55,7 +69,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
         self.presence_detector = PresenceDetector(hass, entry, self)
-        _LOGGER.info("Coordinator initialization completed")
+
+        logCoordinator.debug("Coordinator initialized")
+
+        self.entities = {}
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
@@ -66,16 +83,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def set_active_room_status(self, active: bool):
         """Set the active room status and update listeners."""
-        previous_status = self.active_room.get_active()
         self.active_room.set_active(active)
         self.data[f"{self.room_name}_active_room_status"] = active
-        if previous_status != active:
-            _LOGGER.info(
-                "Active room status changed from %s to %s", previous_status, active
-            )
-        else:
-            _LOGGER.debug("Active room status unchanged: %s", active)
-        _LOGGER.debug("Updated coordinator data: %s", self.data)
+
         self.async_set_updated_data(self.data)
 
     async def async_update_presence_timeout(self, new_timeout: int):
@@ -153,7 +163,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def async_set_number_value(self, key: str, value: float) -> None:
         """Set a number value and update data."""
         self.data[key] = value
-        _LOGGER.info("Coordinator: Updated %s to %s", key, value)
         self.async_set_updated_data(self.data)
 
     async def async_set_switch_value(self, key: str, value: bool):
@@ -170,7 +179,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Handle state changes for the presence sensor."""
         if event.data.get("entity_id") == self.presence_sensor:
             if self.hass.states.get(self.presence_sensor) is None:
-                _LOGGER.warning("Presence sensor %s not found", self.presence_sensor)
+                logCoordinator.warning(
+                    "Presence sensor %s not found", self.presence_sensor
+                )
                 return
             await self.async_refresh()
 
@@ -195,14 +206,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     await self.hass.services.async_call(
                         "homeassistant", "turn_off", {"entity_id": entity_id}
                     )
-            except HomeAssistantError as e:
-                _LOGGER.error(
-                    "Error updating controlled entity %s: %s", entity_id, str(e)
-                )
+            except HomeAssistantError:
+                pass
 
     def update_data_from_options(self, options: dict):
         """Update coordinator data from options."""
-        _LOGGER.info("Updating coordinator data from options: %s", options)
         for key in TIME_KEYS:
             self.data[key] = options.get(key)
         for key, config in NUMBER_CONFIG.items():
@@ -215,4 +223,3 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["night_mode_end"] = options.get(
             "night_mode_end", DEFAULT_NIGHT_MODE_END
         )
-        _LOGGER.info("Updated coordinator data: %s", self.data)

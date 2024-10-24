@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_NIGHT_MODE_SCALE, CONF_ROOM_NAME, DOMAIN, NUMBER_CONFIG
 from .coordinator import DynamicPresenceCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+logNumber = logging.getLogger("dynamic_presence.number")
 
 
 class DynamicPresenceNumber(NumberEntity):
@@ -64,18 +64,18 @@ class DynamicPresenceNumber(NumberEntity):
         """Set new value."""
         if isinstance(value, float) and value.is_integer():
             value = int(value)
-        self.set_native_value(value)
 
+        # Update the coordinator's data
+        await self.coordinator.async_update_number(self.entity_description.key, value)
+        logNumber.debug("Updated number %s to %s", self.entity_description.key, value)
         # Update the config entry options
         entry = self.coordinator.entry
         new_options = dict(entry.options)
         new_options[self.entity_description.key] = value
         self.hass.config_entries.async_update_entry(entry, options=new_options)
 
-        # Trigger the options update
-        await self.coordinator.hass.config_entries.async_reload(entry.entry_id)
-
-        _LOGGER.info("Updated %s to %s", self.entity_description.key, value)
+        # Notify listeners of the update
+        self.async_write_ha_state()
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
@@ -95,7 +95,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Dynamic Presence number entities based on a config entry."""
     room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
-    _LOGGER.info("Setting up Dynamic Presence number entities for %s", room_name)
 
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -117,9 +116,5 @@ async def async_setup_entry(
             ),
         )
         entities.append(entity)
-        _LOGGER.debug("Created number entity: %s", entity.entity_id)
 
     async_add_entities(entities)
-    _LOGGER.info(
-        "Added %d Dynamic Presence number entities for %s", len(entities), room_name
-    )

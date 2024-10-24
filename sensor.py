@@ -1,7 +1,5 @@
 """Sensor platform for Dynamic Presence integration."""
 
-import logging
-
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -15,8 +13,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_ROOM_NAME, DOMAIN, SENSOR_KEYS
 from .coordinator import DynamicPresenceCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -38,7 +34,6 @@ async def async_setup_entry(
     ]
 
     async_add_entities(sensors)
-    _LOGGER.debug("Added %d Dynamic Presence sensors for %s", len(sensors), room_name)
 
 
 class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
@@ -61,15 +56,11 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = f"sensor.dynamic_presence_{self._key}"
         self._attr_native_unit_of_measurement = unit
         self._attr_device_info = coordinator.get_device_info(room)
-        _LOGGER.debug("Initialized sensor: %s with key: %s", self.entity_id, self._key)
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
         value = self.coordinator.data.get(self._key)
-        _LOGGER.debug(
-            "Sensor %s getting value from coordinator: %s", self.entity_id, value
-        )
         if "duration" in self._key:
             return int(value) if value is not None else 0
         return value
@@ -91,4 +82,3 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
-        _LOGGER.debug("Sensor %s added to hass", self.entity_id)

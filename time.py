@@ -1,7 +1,6 @@
 """Time platform for Dynamic Presence integration."""
 
 from datetime import time
-import logging
 
 from homeassistant.components.time import TimeEntity, TimeEntityDescription
 from homeassistant.config_entries import ConfigEntry
@@ -10,8 +9,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_ROOM_NAME, DOMAIN, TIME_KEYS
 from .coordinator import DynamicPresenceCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class DynamicPresenceTime(TimeEntity):
@@ -53,8 +50,6 @@ class DynamicPresenceTime(TimeEntity):
             entry, options=new_options
         )
 
-        _LOGGER.debug("Updated %s to %s", self._key, time_str)
-
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         self.async_on_remove(
@@ -91,4 +86,3 @@ async def async_setup_entry(
     ]
 
     async_add_entities(time_entities)
-    _LOGGER.debug("Added %d time entities for %s", len(time_entities), room_name)

@@ -20,6 +20,7 @@ from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_ACTIVE_ROOM_TIMEOUT,
     CONF_CONTROLLED_ENTITIES,
+    CONF_ENABLE,
     CONF_MANAGE_ON_CLEAR,
     CONF_MANAGE_ON_PRESENCE,
     CONF_NIGHT_MODE_ENABLE,
@@ -30,6 +31,7 @@ from .const import (
     CONF_PRESENCE_SENSOR,
     CONF_PRESENCE_TIMEOUT,
     CONF_ROOM_NAME,
+    DEFAULT_ENABLE,
     DEFAULT_MANAGE_ON_CLEAR,
     DEFAULT_MANAGE_ON_PRESENCE,
     DEFAULT_NIGHT_MODE_ENABLE,
@@ -39,19 +41,16 @@ from .const import (
     NUMBER_CONFIG,
 )
 
-_LOGGER = logging.getLogger(__name__)
+logConfigFlow = logging.getLogger("dynamic_presence.config_flow")
 
 
 def validate_room_name(value):
     """Validate the room name."""
     if not isinstance(value, str):
-        _LOGGER.error("Invalid room name: %s. Room name must be a string", value)
         raise vol.Invalid("Room name must be a string")
     stripped = value.strip()
     if not stripped:
-        _LOGGER.error("Invalid room name: Empty string provided")
         raise vol.Invalid("Room name cannot be empty")
-    _LOGGER.debug("Room name validated: %s", stripped)
     return stripped
 
 
@@ -112,22 +111,22 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
-        _LOGGER.debug("Initializing options flow for %s", config_entry.title)
+        logConfigFlow.debug("Initializing options flow for %s", config_entry.title)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
-        _LOGGER.info("DynamicPresenceOptionsFlowHandler.async_step_init called")
+        logConfigFlow.info("DynamicPresenceOptionsFlowHandler.async_step_init called")
         if user_input is not None:
-            _LOGGER.info("Updating options with user input: %s", user_input)
+            logConfigFlow.info("Updating options with user input: %s", user_input)
             self.hass.config_entries.async_update_entry(
                 self.config_entry, options=user_input
             )
             return self.async_create_entry(title="", data=user_input)
 
         options = {**self.config_entry.data, **self.config_entry.options}
-        _LOGGER.info("Current options: %s", options)
+        logConfigFlow.info("Current options: %s", options)
         data_schema = vol.Schema(
             {
                 vol.Required(
@@ -145,6 +144,20 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
                 ),
+                vol.Optional(
+                    CONF_ENABLE,
+                    default=options.get(CONF_ENABLE, DEFAULT_ENABLE),
+                ): bool,
+                vol.Optional(
+                    CONF_MANAGE_ON_PRESENCE,
+                    default=options.get(
+                        CONF_MANAGE_ON_PRESENCE, DEFAULT_MANAGE_ON_PRESENCE
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_MANAGE_ON_CLEAR,
+                    default=options.get(CONF_MANAGE_ON_CLEAR, DEFAULT_MANAGE_ON_CLEAR),
+                ): bool,
                 vol.Optional(
                     CONF_PRESENCE_TIMEOUT,
                     default=options.get(
@@ -196,24 +209,7 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                         NUMBER_CONFIG[CONF_NIGHT_MODE_SCALE]["default"],
                     ),
                 ): float,
-                vol.Optional(
-                    CONF_MANAGE_ON_PRESENCE,
-                    default=options.get(
-                        CONF_MANAGE_ON_PRESENCE, DEFAULT_MANAGE_ON_PRESENCE
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_MANAGE_ON_CLEAR,
-                    default=options.get(CONF_MANAGE_ON_CLEAR, DEFAULT_MANAGE_ON_CLEAR),
-                ): bool,
             }
         )
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=data_schema,
-            description_placeholders={
-                "night_mode_start_description": "Time when night mode starts",
-                "night_mode_end_description": "Time when night mode ends",
-            },
-        )
+        return self.async_show_form(step_id="init", data_schema=data_schema)
