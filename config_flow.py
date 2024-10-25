@@ -18,6 +18,9 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_CONTROLLED_ENTITIES,
+    CONF_LIGHT_SENSOR,
+    CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
+    CONF_NIGHT_MODE_ENTITIES_ADDMODE,
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
     DOMAIN,
@@ -79,6 +82,19 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
                 ),
+                vol.Optional(
+                    CONF_NIGHT_MODE_CONTROLLED_ENTITIES
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["light", "switch", "input_boolean"], multiple=True
+                    )
+                ),
+                vol.Optional(CONF_NIGHT_MODE_ENTITIES_ADDMODE): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=["additive", "exclusive"])
+                ),
+                vol.Optional(CONF_LIGHT_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor"])
+                ),
             }
         )
 
@@ -125,6 +141,19 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                     selector.EntitySelectorConfig(
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
+                ),
+                vol.Optional(
+                    CONF_NIGHT_MODE_CONTROLLED_ENTITIES
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["light", "switch", "input_boolean"], multiple=True
+                    )
+                ),
+                vol.Optional(CONF_NIGHT_MODE_ENTITIES_ADDMODE): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=["additive", "exclusive"])
+                ),
+                vol.Optional(CONF_LIGHT_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor"])
                 ),
             }
         )

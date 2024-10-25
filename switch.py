@@ -50,12 +50,7 @@ class DynamicPresenceSwitch(SwitchEntity):
 
     async def _async_update_switch_state(self, state: bool) -> None:
         """Update switch state."""
-        # Update coordinator data
-        self.coordinator.data[self._switch_key] = state
-        # Save to options for persistence
         await self.coordinator.async_save_options(self._switch_key, state)
-        # Notify listeners of the update
-        self.coordinator.async_set_updated_data(self.coordinator.data)
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""

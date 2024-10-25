@@ -1,24 +1,28 @@
 """Coordinator for Dynamic Presence integration."""
 
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_CONTROLLED_ENTITIES,
-    CONF_MANAGE_ON_CLEAR,
-    CONF_MANAGE_ON_PRESENCE,
+    CONF_LIGHT_SENSOR,
+    CONF_LIGHT_THRESHOLD,
+    CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
+    CONF_NIGHT_MODE_ENTITIES_ADDMODE,
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
+    DEFAULT_LIGHT_THRESHOLD,
     DEFAULT_NIGHT_MODE_END,
     DEFAULT_NIGHT_MODE_START,
     DOMAIN,
+    NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
     NUMBER_CONFIG,
     SWITCH_KEYS,
     TIME_KEYS,
@@ -52,6 +56,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             hass,
             name="Dynamic Presence",
             logger=logCoordinator,
+            update_interval=timedelta(seconds=1),
         )
         self.entry = entry
         self.room_name = (
@@ -59,7 +64,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         )
 
         self.data = {}
-        self.is_active = False  # Initialize is_active
+        self.data["night_mode_start"] = DEFAULT_NIGHT_MODE_START
+        self.data["night_mode_end"] = DEFAULT_NIGHT_MODE_END
+        self.is_active = False
         self.active_room_threshold = entry.options.get(CONF_ACTIVE_ROOM_THRESHOLD, 600)
 
         self.update_data_from_options(entry.options)
@@ -73,13 +80,36 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Update data from presence detector."""
+        current_time = datetime.now()
+
+        # Update light level if sensor is configured
+        if light_sensor := self.entry.data.get(CONF_LIGHT_SENSOR):
+            if state := self.hass.states.get(light_sensor):
+                try:
+                    self.data[f"{self.room_name}_light_level"] = int(state.state)
+                except (ValueError, TypeError):
+                    logCoordinator.warning(
+                        "Invalid light level value from sensor %s: %s",
+                        light_sensor,
+                        state.state,
+                    )
+                    self.data[f"{self.room_name}_light_level"] = None
+
+        # Update presence state
         await self.presence_detector.update_presence()
+
+        # Update durations
+        await self.presence_detector.calculate_durations(current_time)
+
+        # Check active room status
         await self._check_active_room_status()
+
         return self.data
 
     async def _check_active_room_status(self):
         """Check and update active room status based on occupancy duration."""
         occupancy_duration = self.data.get(f"{self.room_name}_occupancy_duration", 0)
+        absence_duration = self.data.get(f"{self.room_name}_absence_duration", 0)
         is_occupied = self.data.get(f"{self.room_name}_occupancy_state") == "occupied"
 
         if is_occupied and occupancy_duration >= self.active_room_threshold:
@@ -92,32 +122,19 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     occupancy_duration,
                 )
         elif not is_occupied and self.is_active:
-            self.is_active = False
-            self.data[f"{self.room_name}_active_room_status"] = False
-            logCoordinator.debug("Room %s deactivated due to absence", self.room_name)
+            # Only deactivate if absence duration exceeds active room timeout
+            if absence_duration >= self.data.get("active_room_timeout"):
+                self.is_active = False
+                self.data[f"{self.room_name}_active_room_status"] = False
+                logCoordinator.debug(
+                    "Room %s deactivated after timeout", self.room_name
+                )
 
-    async def set_active_room_status(self, active: bool):
-        """Set the active room status and update listeners."""
-        self.active_room.set_active(active)
-        self.data[f"{self.room_name}_active_room_status"] = active
-
-        self.async_set_updated_data(self.data)
-
-    async def async_update_presence_timeout(self, new_timeout: int):
+    async def async_update_presence_timeout(self, timeout: int):
         """Update the presence timeout."""
-        self.presence_detector.set_presence_timeout(new_timeout)
-        self.data["presence_timeout"] = new_timeout
-        self.async_set_updated_data(self.data)
-
-    async def async_update_night_mode_settings(
-        self, enabled: bool, start: str, end: str
-    ):
-        """Update night mode settings."""
-        self.night_mode.update_night_mode_settings(enabled, start, end)
-        self.data["night_mode_enabled"] = enabled
-        self.data["night_mode_start"] = start
-        self.data["night_mode_end"] = end
-        self.async_set_updated_data(self.data)
+        self.presence_detector.set_presence_timeout(timeout)
+        self.data["presence_timeout"] = timeout
+        await self.async_save_options("presence_timeout", timeout)
 
     def get_entity_name(self, entity_type: str, name: str) -> str:
         """Get the entity name."""
@@ -148,25 +165,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 return
             await self.async_refresh()
 
-    async def update_controlled_entities(self):
-        """Update controlled entities based on presence state."""
-        controlled_entities = self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
-        manage_on_presence = self.entry.options.get(CONF_MANAGE_ON_PRESENCE, True)
-        manage_on_clear = self.entry.options.get(CONF_MANAGE_ON_CLEAR, True)
-
-        for entity_id in controlled_entities:
-            try:
-                if self.presence_detected and manage_on_presence:
-                    await self.hass.services.async_call(
-                        "homeassistant", "turn_on", {"entity_id": entity_id}
-                    )
-                elif not self.presence_detected and manage_on_clear:
-                    await self.hass.services.async_call(
-                        "homeassistant", "turn_off", {"entity_id": entity_id}
-                    )
-            except HomeAssistantError:
-                pass
-
     def update_data_from_options(self, options: dict):
         """Update coordinator data from options."""
         for key in TIME_KEYS:
@@ -175,12 +173,12 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             self.data[key] = options.get(key, config["default"])
         for key in SWITCH_KEYS:
             self.data[key] = options.get(key)
-        self.data["night_mode_start"] = options.get(
-            "night_mode_start", DEFAULT_NIGHT_MODE_START
+
+        # Update specific thresholds
+        self.active_room_threshold = options.get(
+            CONF_ACTIVE_ROOM_THRESHOLD, self.active_room_threshold
         )
-        self.data["night_mode_end"] = options.get(
-            "night_mode_end", DEFAULT_NIGHT_MODE_END
-        )
+        self.data["active_room_threshold"] = self.active_room_threshold
 
     async def async_update_options(self, _: HomeAssistant, entry: ConfigEntry) -> None:
         """Update coordinator data from options."""
@@ -193,8 +191,137 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def async_save_options(self, key: str, value: Any) -> None:
         """Save a single option value to config entry."""
         new_options = dict(self.entry.options)
+        new_data = dict(self.entry.data)
+
+        # Update both options and data
         new_options[key] = value
-        self.data[key] = value  # Update data directly
+        new_data[key] = value
+
+        # Update coordinator's internal state
+        if key in NUMBER_CONFIG:
+            # Handle number inputs
+            setattr(self, key, value)
+        elif key in SWITCH_KEYS:
+            # Handle switch inputs
+            setattr(self, key, value)
+        elif key in TIME_KEYS:
+            # Handle time inputs
+            setattr(self, key, value)
+
+        self.data[key] = value  # Update coordinator data
         self.async_set_updated_data(self.data)  # Notify listeners
-        # Save to options without triggering full reload
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+
+        # Save to config entry
+        self.hass.config_entries.async_update_entry(
+            self.entry, data=new_data, options=new_options
+        )
+
+    async def async_update_controlled_entities(self, entities: list):
+        """Update controlled entities list."""
+        self.data["controlled_entities"] = entities
+        new_options = dict(self.entry.options)
+        new_options[CONF_CONTROLLED_ENTITIES] = entities
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_CONTROLLED_ENTITIES: entities}
+        )
+
+    def _is_room_dark(self) -> bool:
+        """Check if room is too dark and needs lights."""
+        light_level = self.data.get(f"{self.room_name}_light_level")
+        threshold = self.data.get(CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD)
+
+        if light_level is not None:
+            return light_level < threshold
+
+        # If no light sensor or invalid reading, default to True (assume room needs light)
+        return True
+
+    def _get_current_timeout(self) -> int:
+        """Get the current timeout based on active status and night mode."""
+        base_timeout = (
+            self.data.get("active_room_timeout")
+            if self.is_active
+            else self.data.get("presence_timeout")
+        )
+
+        if self.data.get("night_mode_enable"):
+            current_time = datetime.now().strftime("%H:%M")
+            start = self.data.get("night_mode_start")
+            end = self.data.get("night_mode_end")
+
+            # Check if current time is within night mode hours
+            if start <= end:
+                is_night_mode = start <= current_time < end
+            else:  # Handles case where night mode spans midnight
+                is_night_mode = current_time >= start or current_time < end
+
+            if is_night_mode:
+                scale = self.data.get("night_mode_scale", 0.5)
+                return int(base_timeout * scale)
+
+        return base_timeout
+
+    def _get_controlled_entities(self) -> list:
+        """Get the list of entities to control based on night mode and addmode."""
+        regular_entities = self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
+        night_entities = self.entry.data.get(CONF_NIGHT_MODE_CONTROLLED_ENTITIES, [])
+
+        if not self.data.get("night_mode_enable"):
+            return regular_entities
+
+        # Check if current time is within night mode hours
+        current_time = datetime.now().strftime("%H:%M")
+        start = self.data.get("night_mode_start")
+        end = self.data.get("night_mode_end")
+
+        if start <= end:
+            is_night_mode = start <= current_time < end
+        else:  # Handles case where night mode spans midnight
+            is_night_mode = current_time >= start or current_time < end
+
+        if not is_night_mode:
+            return regular_entities
+
+        # We're in night mode, handle entities based on addmode
+        addmode = self.data.get(CONF_NIGHT_MODE_ENTITIES_ADDMODE)
+        if addmode == NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE:
+            return night_entities if night_entities else regular_entities
+        # ADDITIVE
+        return list(set(regular_entities + night_entities))
+
+    async def manage_entities(self, turn_on: bool = False):
+        """Manage controlled entities based on presence and light conditions."""
+        if not self.data.get("enable", True):
+            return
+
+        if turn_on and not self.data.get("manage_on_presence", True):
+            return
+
+        if not turn_on and not self.data.get("manage_on_clear", True):
+            return
+
+        # For turning off, check if absence duration has exceeded timeout
+        if not turn_on:
+            absence_duration = self.data.get(f"{self.room_name}_absence_duration", 0)
+            timeout = self._get_current_timeout()
+
+            if absence_duration < timeout:
+                # Don't turn off yet, timeout not reached
+                return
+
+        # Check if we should turn on entities based on light level
+        should_activate = turn_on and self._is_room_dark()
+
+        service = "turn_on" if should_activate else "turn_off"
+
+        # Get the appropriate list of entities based on night mode and addmode
+        entities = self._get_controlled_entities()
+
+        for entity_id in entities:
+            try:
+                await self.hass.services.async_call(
+                    "homeassistant", service, {"entity_id": entity_id}
+                )
+                logCoordinator.debug("%s %s", service, entity_id)
+            except (ValueError, TimeoutError) as e:
+                logCoordinator.error("Failed to %s %s: %s", service, entity_id, str(e))

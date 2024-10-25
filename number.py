@@ -59,9 +59,6 @@ class DynamicPresenceNumber(NumberEntity):
         """Set new value."""
         if isinstance(value, float) and value.is_integer():
             value = int(value)
-
-        self.coordinator.data[self.entity_description.key] = value
-        self.coordinator.async_set_updated_data(self.coordinator.data)
         await self.coordinator.async_save_options(self.entity_description.key, value)
 
     async def async_added_to_hass(self):

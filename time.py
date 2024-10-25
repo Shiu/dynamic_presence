@@ -1,14 +1,24 @@
 """Time platform for Dynamic Presence integration."""
 
 from datetime import time
+import logging
 
 from homeassistant.components.time import TimeEntity, TimeEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_ROOM_NAME, DOMAIN, TIME_KEYS
+from .const import (
+    CONF_ROOM_NAME,
+    DEFAULT_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
+    DOMAIN,
+    TIME_DEFAULT_VALUES,
+    TIME_KEYS,
+)
 from .coordinator import DynamicPresenceCoordinator
+
+logTime = logging.getLogger("dynamic_presence.time")
 
 
 class DynamicPresenceTime(TimeEntity):
@@ -23,13 +33,15 @@ class DynamicPresenceTime(TimeEntity):
         """Initialize the Dynamic Presence time entity."""
         super().__init__()
         self.coordinator = coordinator
+        self.room = room
         self.entity_description = description
+        self._key = description.key
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{description.key}"
         self._attr_has_entity_name = True
         self._attr_name = description.name
         self.entity_id = f"time.dynamic_presence_{room}_{description.key}"
         self._attr_device_info = coordinator.get_device_info(room)
-        self._key = description.key
+        self._default_time = TIME_DEFAULT_VALUES.get(description.key)
 
     @property
     def native_value(self):
@@ -39,9 +51,6 @@ class DynamicPresenceTime(TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Set the time."""
         time_str = value.isoformat()
-
-        self.coordinator.data[self._key] = time_str
-        self.coordinator.async_set_updated_data(self.coordinator.data)
         await self.coordinator.async_save_options(self._key, time_str)
 
     async def async_added_to_hass(self):
@@ -67,16 +76,33 @@ async def async_setup_entry(
     room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    time_entities = [
-        DynamicPresenceTime(
+    entities = []
+    for time_key in TIME_KEYS:
+        default_time = TIME_DEFAULT_VALUES.get(time_key)
+
+        if time_key not in entry.options:
+            coordinator.data[time_key] = default_time
+            logTime.debug(
+                "Time %s set to default value %s",
+                time_key,
+                coordinator.data[time_key],
+            )
+        else:
+            coordinator.data[time_key] = entry.options[time_key]
+            logTime.debug(
+                "Time %s set to option value %s",
+                time_key,
+                coordinator.data[time_key],
+            )
+
+        entity = DynamicPresenceTime(
             coordinator,
             room_name,
             TimeEntityDescription(
-                key=key,
-                name=key.replace("_", " ").title(),
+                key=time_key,
+                name=time_key.replace("_", " ").title(),
             ),
         )
-        for key in TIME_KEYS
-    ]
+        entities.append(entity)
 
-    async_add_entities(time_entities)
+    async_add_entities(entities)
