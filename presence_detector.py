@@ -11,6 +11,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
@@ -45,10 +46,51 @@ class PresenceDetector:
         self.last_absence_time = None
         self.presence_detected = False
         self.grace_period = timedelta(seconds=15)
-        self.last_absence_start = None
         self.active_room_threshold = entry.options.get(
             CONF_ACTIVE_ROOM_THRESHOLD, 300
         )  # Default to 5 minutes
+        self._timer = None
+        self._grace_period_start = None
+
+    async def start_timer(self) -> None:
+        """Start the timer for updating durations and handling grace period."""
+        if self._timer is None:
+            self._timer = async_track_time_interval(
+                self.hass, self._timer_update, timedelta(seconds=1)
+            )
+
+    async def _timer_update(self, _now: datetime) -> None:
+        """Handle timer updates for durations and grace period."""
+        current_time = datetime.now()
+
+        # Handle grace period
+        if self._grace_period_start and self.presence_detected:
+            if (current_time - self._grace_period_start) >= self.grace_period:
+                self.presence_detected = False
+                self.last_absence_time = self._grace_period_start
+                self._grace_period_start = None
+                logPresenceDetector.debug("Grace period expired, marking as absent")
+                await self.update_controlled_entities()
+
+        # Update durations
+        if self.presence_detected:
+            occupancy_duration = self.get_presence_duration()
+            self.coordinator.data.update(
+                {
+                    f"{self.coordinator.room_name}_occupancy_duration": occupancy_duration,
+                    f"{self.coordinator.room_name}_absence_duration": 0,
+                }
+            )
+        else:
+            absence_duration = self.get_absence_duration()
+            self.coordinator.data.update(
+                {
+                    f"{self.coordinator.room_name}_occupancy_duration": 0,
+                    f"{self.coordinator.room_name}_absence_duration": absence_duration,
+                }
+            )
+
+        self.coordinator.async_set_updated_data(self.coordinator.data)
 
     async def update_presence(self):
         """Update the presence state based on the presence sensor."""
@@ -60,78 +102,31 @@ class PresenceDetector:
             return
 
         new_presence = presence_sensor.state == "on"
-        current_time = datetime.now()
 
         if new_presence:
             if not self.presence_detected:
-                self.last_presence_time = current_time
+                self.last_presence_time = datetime.now()
                 logPresenceDetector.debug("New occupancy detected")
             self.presence_detected = True
-            self.last_absence_start = None
+            self._grace_period_start = None
         elif self.presence_detected:
-            if not self.last_absence_start:
-                self.last_absence_start = current_time
+            if not self._grace_period_start:
+                self._grace_period_start = datetime.now()
                 logPresenceDetector.debug(
                     "Potential absence detected, starting grace period"
                 )
-            elif (current_time - self.last_absence_start) >= self.grace_period:
-                self.presence_detected = False
-                self.last_absence_time = self.last_absence_start
-                logPresenceDetector.debug("Absence confirmed after grace period")
 
-        if self.presence_detected:
-            occupancy_duration = (
-                int((current_time - self.last_presence_time).total_seconds())
-                if self.last_presence_time
-                else 0
-            )
-            absence_duration = 0
-
-            logPresenceDetector.debug(
-                "Occupancy duration: %s, Threshold: %s",
-                occupancy_duration,
-                self.active_room_threshold,
-            )
-
-            if occupancy_duration >= self.active_room_threshold:
-                logPresenceDetector.debug(
-                    "Occupancy duration %s reached threshold %s",
-                    occupancy_duration,
-                    self.active_room_threshold,
-                )
-                await self.coordinator.set_active_room_status(True)
-            else:
-                logPresenceDetector.debug(
-                    "Occupancy duration %s not yet reached threshold %s",
-                    occupancy_duration,
-                    self.active_room_threshold,
-                )
-                await self.coordinator.set_active_room_status(False)
-        else:
-            occupancy_duration = 0
-            absence_duration = (
-                int((current_time - self.last_absence_time).total_seconds())
-                if self.last_absence_time
-                else 0
-            )
-            await self.coordinator.set_active_room_status(False)
-
+        # Update basic presence state
         self.coordinator.data.update(
             {
                 f"{self.coordinator.room_name}_occupancy_state": "occupied"
                 if self.presence_detected
                 else "vacant",
-                f"{self.coordinator.room_name}_occupancy_duration": occupancy_duration,
-                f"{self.coordinator.room_name}_absence_duration": absence_duration,
             }
         )
 
-        logPresenceDetector.debug(
-            "Updated coordinator data: %s",
-            self.coordinator.data,
-        )
-
         await self.update_controlled_entities()
+        await self.check_room_activation()
 
     def set_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""
@@ -187,7 +182,6 @@ class PresenceDetector:
             logPresenceDetector.debug(
                 "Room %s set as active", self.coordinator.room_name
             )
-            await self.coordinator.async_update_listeners()
 
     def update_from_options(self, options: dict):
         """Update detector values from new options."""
@@ -198,3 +192,16 @@ class PresenceDetector:
             CONF_ACTIVE_ROOM_THRESHOLD, self.active_room_threshold
         )
         # Add any other options that need to be updated
+
+    async def check_room_activation(self):
+        """Check and handle room activation based on occupancy duration."""
+        occupancy_duration = self.get_presence_duration()
+
+        if self.presence_detected and occupancy_duration >= self.active_room_threshold:
+            await self.set_room_active()
+        elif not self.presence_detected:
+            if self.coordinator.active_room.is_active:
+                self.coordinator.active_room.set_active(False)
+                logPresenceDetector.debug(
+                    "Room %s set as inactive", self.coordinator.room_name
+                )

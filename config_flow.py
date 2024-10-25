@@ -17,28 +17,10 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_ACTIVE_ROOM_THRESHOLD,
-    CONF_ACTIVE_ROOM_TIMEOUT,
     CONF_CONTROLLED_ENTITIES,
-    CONF_ENABLE,
-    CONF_MANAGE_ON_CLEAR,
-    CONF_MANAGE_ON_PRESENCE,
-    CONF_NIGHT_MODE_ENABLE,
-    CONF_NIGHT_MODE_END,
-    CONF_NIGHT_MODE_SCALE,
-    CONF_NIGHT_MODE_START,
-    CONF_NIGHT_MODE_TIMEOUT,
     CONF_PRESENCE_SENSOR,
-    CONF_PRESENCE_TIMEOUT,
     CONF_ROOM_NAME,
-    DEFAULT_ENABLE,
-    DEFAULT_MANAGE_ON_CLEAR,
-    DEFAULT_MANAGE_ON_PRESENCE,
-    DEFAULT_NIGHT_MODE_ENABLE,
-    DEFAULT_NIGHT_MODE_END,
-    DEFAULT_NIGHT_MODE_START,
     DOMAIN,
-    NUMBER_CONFIG,
 )
 
 logConfigFlow = logging.getLogger("dynamic_presence.config_flow")
@@ -144,71 +126,6 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
                 ),
-                vol.Optional(
-                    CONF_ENABLE,
-                    default=options.get(CONF_ENABLE, DEFAULT_ENABLE),
-                ): bool,
-                vol.Optional(
-                    CONF_MANAGE_ON_PRESENCE,
-                    default=options.get(
-                        CONF_MANAGE_ON_PRESENCE, DEFAULT_MANAGE_ON_PRESENCE
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_MANAGE_ON_CLEAR,
-                    default=options.get(CONF_MANAGE_ON_CLEAR, DEFAULT_MANAGE_ON_CLEAR),
-                ): bool,
-                vol.Optional(
-                    CONF_PRESENCE_TIMEOUT,
-                    default=options.get(
-                        CONF_PRESENCE_TIMEOUT,
-                        NUMBER_CONFIG[CONF_PRESENCE_TIMEOUT]["default"],
-                    ),
-                ): int,
-                vol.Optional(
-                    CONF_ACTIVE_ROOM_TIMEOUT,
-                    default=options.get(
-                        CONF_ACTIVE_ROOM_TIMEOUT,
-                        NUMBER_CONFIG[CONF_ACTIVE_ROOM_TIMEOUT]["default"],
-                    ),
-                ): int,
-                vol.Optional(
-                    CONF_ACTIVE_ROOM_THRESHOLD,
-                    default=options.get(
-                        CONF_ACTIVE_ROOM_THRESHOLD,
-                        NUMBER_CONFIG[CONF_ACTIVE_ROOM_THRESHOLD]["default"],
-                    ),
-                ): int,
-                vol.Required(
-                    CONF_NIGHT_MODE_ENABLE,
-                    default=options.get(
-                        CONF_NIGHT_MODE_ENABLE, DEFAULT_NIGHT_MODE_ENABLE
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_NIGHT_MODE_TIMEOUT,
-                    default=options.get(
-                        CONF_NIGHT_MODE_TIMEOUT,
-                        NUMBER_CONFIG[CONF_NIGHT_MODE_TIMEOUT]["default"],
-                    ),
-                ): int,
-                vol.Optional(
-                    CONF_NIGHT_MODE_START,
-                    default=options.get(
-                        CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
-                    ),
-                ): selector.TimeSelector(),
-                vol.Optional(
-                    CONF_NIGHT_MODE_END,
-                    default=options.get(CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END),
-                ): selector.TimeSelector(),
-                vol.Optional(
-                    CONF_NIGHT_MODE_SCALE,
-                    default=options.get(
-                        CONF_NIGHT_MODE_SCALE,
-                        NUMBER_CONFIG[CONF_NIGHT_MODE_SCALE]["default"],
-                    ),
-                ): float,
             }
         )
 

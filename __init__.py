@@ -32,21 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.presence_detector.start_timer()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+    entry.async_on_unload(entry.add_update_listener(coordinator.async_update_options))
 
     return True
-
-
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.update_data_from_options(entry.options)
-    await coordinator.async_request_refresh()
-
-    # Reload the config entry
-    for entity in coordinator.entities.values():
-        if hasattr(entity, "async_update_config"):
-            await entity.async_update_config(entry.options)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

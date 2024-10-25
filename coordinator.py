@@ -1,13 +1,12 @@
 """Coordinator for Dynamic Presence integration."""
 
-from datetime import timedelta
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .active_room import ActiveRoom
@@ -41,7 +40,7 @@ class MessageFilter(logging.Filter):
 
 
 logCoordinator = logging.getLogger("dynamic_presence.coordinator")
-logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
+# logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
 
 
 class DynamicPresenceCoordinator(DataUpdateCoordinator):
@@ -53,7 +52,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             hass,
             name="Dynamic Presence",
             logger=logCoordinator,
-            update_interval=timedelta(seconds=1),
         )
         self.entry = entry
         self.room_name = (
@@ -69,9 +67,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
         self.presence_detector = PresenceDetector(hass, entry, self)
-
-        logCoordinator.debug("Coordinator initialized")
-
         self.entities = {}
 
     async def _async_update_data(self):
@@ -111,21 +106,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["active_room_threshold"] = threshold
         self.async_set_updated_data(self.data)
 
-    async def async_update_switch(self, key: str, value: bool):
-        """Update a switch."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
-    async def async_update_number(self, key: str, value: float):
-        """Update a number."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
-    async def async_update_time(self, key: str, value: str):
-        """Update a time."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
     def get_entity_name(self, entity_type: str, name: str) -> str:
         """Get the entity name."""
         room_name = (
@@ -134,21 +114,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             .replace(" ", "_")
         )
         return f"{entity_type}.{room_name}_{name.lower().replace(' ', '_')}"
-
-    def register_entity(
-        self, entity: Entity, room: str, entity_type: str, specific_name: str
-    ):
-        """Register an entity."""
-        entity_name = self.get_entity_name(room, entity_type, specific_name)
-        self._entities[entity_name] = entity
-
-    def update_entity_state(
-        self, room: str, entity_type: str, specific_name: str, new_state
-    ):
-        """Update an entity state."""
-        entity_name = self.get_entity_name(room, entity_type, specific_name)
-        if entity_name in self._entities:
-            self._entities[entity_name].async_write_ha_state()
 
     def get_device_info(self, room: str) -> dict:
         """Return device info for the given room."""
@@ -160,21 +125,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             "sw_version": "1.0",
         }
 
-    async def async_set_number_value(self, key: str, value: float) -> None:
-        """Set a number value and update data."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
-    async def async_set_switch_value(self, key: str, value: bool):
-        """Update a switch value."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
-    async def async_set_time_value(self, key: str, value: str):
-        """Update a time value."""
-        self.data[key] = value
-        self.async_set_updated_data(self.data)
-
     async def _handle_state_change(self, event):
         """Handle state changes for the presence sensor."""
         if event.data.get("entity_id") == self.presence_sensor:
@@ -184,11 +134,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 )
                 return
             await self.async_refresh()
-
-    async def async_refresh(self):
-        """Refresh data from the presence detector."""
-        await self._async_update_data()
-        self.async_set_updated_data(self.data)
 
     async def update_controlled_entities(self):
         """Update controlled entities based on presence state."""
@@ -223,3 +168,20 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["night_mode_end"] = options.get(
             "night_mode_end", DEFAULT_NIGHT_MODE_END
         )
+
+    async def async_update_options(self, _: HomeAssistant, entry: ConfigEntry) -> None:
+        """Update coordinator data from options."""
+        # Only update changed values, not everything
+        for key, value in entry.options.items():
+            if key in self.data and self.data[key] != value:
+                self.data[key] = value
+        self.async_set_updated_data(self.data)
+
+    async def async_save_options(self, key: str, value: Any) -> None:
+        """Save a single option value to config entry."""
+        new_options = dict(self.entry.options)
+        new_options[key] = value
+        self.data[key] = value  # Update data directly
+        self.async_set_updated_data(self.data)  # Notify listeners
+        # Save to options without triggering full reload
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)

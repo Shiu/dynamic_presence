@@ -39,16 +39,10 @@ class DynamicPresenceTime(TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Set the time."""
         time_str = value.isoformat()
+
         self.coordinator.data[self._key] = time_str
         self.coordinator.async_set_updated_data(self.coordinator.data)
-
-        # Update the config entry options
-        entry = self.coordinator.entry
-        new_options = dict(entry.options)
-        new_options[self._key] = time_str
-        self.coordinator.hass.config_entries.async_update_entry(
-            entry, options=new_options
-        )
+        await self.coordinator.async_save_options(self._key, time_str)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""

@@ -35,7 +35,7 @@
                     "room_name": "Room Name",
                     "presence_sensor": "Presence Sensor",
                     "controlled_entities": "Controlled Entities",
-                    "enable": "Enable or disable Dynamic Presence functionality in this room",
+                    "enable": "Enable",
                     "presence_timeout": "Presence Timeout",
                     "active_room_threshold": "Active Room Threshold",
                     "active_room_timeout": "Active Room Timeout",
