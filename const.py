@@ -10,6 +10,7 @@ CONF_ENABLE = "enable"
 CONF_MANAGE_ON_CLEAR = "manage_on_clear"
 CONF_MANAGE_ON_PRESENCE = "manage_on_presence"
 CONF_ACTIVE_ROOM_THRESHOLD = "active_room_threshold"
+CONF_SHORT_ABSENCE_THRESHOLD = "short_absence_threshold"
 CONF_ACTIVE_ROOM_TIMEOUT = "active_room_timeout"
 CONF_NIGHT_MODE_TIMEOUT = "night_mode_timeout"
 CONF_NIGHT_MODE_SCALE = "night_mode_scale"
@@ -22,6 +23,7 @@ DEFAULT_ACTIVE_ROOM_THRESHOLD = 600
 DEFAULT_ACTIVE_ROOM_TIMEOUT = 1200
 DEFAULT_NIGHT_MODE_TIMEOUT = 120
 DEFAULT_NIGHT_MODE_SCALE = 0.5
+DEFAULT_SHORT_ABSENCE_THRESHOLD = 10
 DEFAULT_NIGHT_MODE_START = "23:00"
 DEFAULT_NIGHT_MODE_END = "07:00"
 DEFAULT_MANAGE_ON_CLEAR = True
@@ -69,6 +71,14 @@ NUMBER_CONFIG = {
         "step": 0.1,
         "unit": None,
         "default": DEFAULT_NIGHT_MODE_SCALE,
+    },
+    CONF_SHORT_ABSENCE_THRESHOLD: {
+        "name": "Short Absence Threshold",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "unit": "s",
+        "default": DEFAULT_SHORT_ABSENCE_THRESHOLD,
     },
 }
 

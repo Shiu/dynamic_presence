@@ -14,12 +14,12 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
-    CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_CONTROLLED_ENTITIES,
     CONF_MANAGE_ON_CLEAR,
     CONF_MANAGE_ON_PRESENCE,
     CONF_PRESENCE_SENSOR,
     CONF_PRESENCE_TIMEOUT,
+    CONF_SHORT_ABSENCE_THRESHOLD,
 )
 
 logPresenceDetector = logging.getLogger("dynamic_presence.presence_detector")
@@ -45,10 +45,9 @@ class PresenceDetector:
         self.last_presence_time = None
         self.last_absence_time = None
         self.presence_detected = False
-        self.grace_period = timedelta(seconds=15)
-        self.active_room_threshold = entry.options.get(
-            CONF_ACTIVE_ROOM_THRESHOLD, 300
-        )  # Default to 5 minutes
+        self.grace_period = timedelta(
+            seconds=entry.options.get(CONF_SHORT_ABSENCE_THRESHOLD, 10)
+        )
         self._timer = None
         self._grace_period_start = None
 
@@ -73,16 +72,20 @@ class PresenceDetector:
                 await self.update_controlled_entities()
 
         # Update durations
-        if self.presence_detected:
-            occupancy_duration = self.get_presence_duration()
+        if self.presence_detected and self.last_presence_time:
+            occupancy_duration = int(
+                (current_time - self.last_presence_time).total_seconds()
+            )
             self.coordinator.data.update(
                 {
                     f"{self.coordinator.room_name}_occupancy_duration": occupancy_duration,
                     f"{self.coordinator.room_name}_absence_duration": 0,
                 }
             )
-        else:
-            absence_duration = self.get_absence_duration()
+        elif not self.presence_detected and self.last_absence_time:
+            absence_duration = int(
+                (current_time - self.last_absence_time).total_seconds()
+            )
             self.coordinator.data.update(
                 {
                     f"{self.coordinator.room_name}_occupancy_duration": 0,
@@ -105,28 +108,43 @@ class PresenceDetector:
 
         if new_presence:
             if not self.presence_detected:
+                # Person enters empty room
+                self.presence_detected = True
                 self.last_presence_time = datetime.now()
-                logPresenceDetector.debug("New occupancy detected")
-            self.presence_detected = True
-            self._grace_period_start = None
+                self.last_absence_time = None  # Stop absence timer
+                self._grace_period_start = None
+                # Reset absence duration in coordinator
+                self.coordinator.data[
+                    f"{self.coordinator.room_name}_absence_duration"
+                ] = 0
+                logPresenceDetector.debug("New occupancy detected, absence timer reset")
         elif self.presence_detected:
+            # Person has left room
             if not self._grace_period_start:
+                # Start grace period
                 self._grace_period_start = datetime.now()
                 logPresenceDetector.debug(
-                    "Potential absence detected, starting grace period"
+                    "Potential absence detected, grace period started"
                 )
+            elif (datetime.now() - self._grace_period_start) >= self.grace_period:
+                # Absence confirmed after grace period
+                self.presence_detected = False
+                self.last_presence_time = None  # Stop occupancy timer
+                self.last_absence_time = (
+                    self._grace_period_start
+                )  # Start absence timer from when grace period began
+                # Reset occupancy duration in coordinator
+                self.coordinator.data[
+                    f"{self.coordinator.room_name}_occupancy_duration"
+                ] = 0
+                logPresenceDetector.debug("Absence confirmed, occupancy timer reset")
 
         # Update basic presence state
-        self.coordinator.data.update(
-            {
-                f"{self.coordinator.room_name}_occupancy_state": "occupied"
-                if self.presence_detected
-                else "vacant",
-            }
+        self.coordinator.data[f"{self.coordinator.room_name}_occupancy_state"] = (
+            "occupied" if self.presence_detected else "vacant"
         )
 
         await self.update_controlled_entities()
-        await self.check_room_activation()
 
     def set_presence_timeout(self, new_timeout: int):
         """Update the presence timeout."""
@@ -175,33 +193,9 @@ class PresenceDetector:
                     "Error updating controlled entity %s: %s", entity_id, str(e)
                 )
 
-    async def set_room_active(self):
-        """Set the room as active."""
-        if not self.coordinator.active_room.is_active:
-            self.coordinator.active_room.set_active(True)
-            logPresenceDetector.debug(
-                "Room %s set as active", self.coordinator.room_name
-            )
-
     def update_from_options(self, options: dict):
         """Update detector values from new options."""
         self.presence_timeout = options.get(
             CONF_PRESENCE_TIMEOUT, self.presence_timeout
         )
-        self.active_room_threshold = options.get(
-            CONF_ACTIVE_ROOM_THRESHOLD, self.active_room_threshold
-        )
         # Add any other options that need to be updated
-
-    async def check_room_activation(self):
-        """Check and handle room activation based on occupancy duration."""
-        occupancy_duration = self.get_presence_duration()
-
-        if self.presence_detected and occupancy_duration >= self.active_room_threshold:
-            await self.set_room_active()
-        elif not self.presence_detected:
-            if self.coordinator.active_room.is_active:
-                self.coordinator.active_room.set_active(False)
-                logPresenceDetector.debug(
-                    "Room %s set as inactive", self.coordinator.room_name
-                )

@@ -9,8 +9,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .active_room import ActiveRoom
 from .const import (
+    CONF_ACTIVE_ROOM_THRESHOLD,
     CONF_CONTROLLED_ENTITIES,
     CONF_MANAGE_ON_CLEAR,
     CONF_MANAGE_ON_PRESENCE,
@@ -57,8 +57,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.room_name = (
             entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
         )
-        self.active_room = ActiveRoom(hass, entry)
+
         self.data = {}
+        self.is_active = False  # Initialize is_active
+        self.active_room_threshold = entry.options.get(CONF_ACTIVE_ROOM_THRESHOLD, 600)
 
         self.update_data_from_options(entry.options)
 
@@ -70,11 +72,29 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.entities = {}
 
     async def _async_update_data(self):
-        """Fetch data from API endpoint."""
-        current_occupancy_duration = self.data.get("occupancy_duration", 0)
+        """Update data from presence detector."""
         await self.presence_detector.update_presence()
-        self.data["occupancy_duration"] = current_occupancy_duration
+        await self._check_active_room_status()
         return self.data
+
+    async def _check_active_room_status(self):
+        """Check and update active room status based on occupancy duration."""
+        occupancy_duration = self.data.get(f"{self.room_name}_occupancy_duration", 0)
+        is_occupied = self.data.get(f"{self.room_name}_occupancy_state") == "occupied"
+
+        if is_occupied and occupancy_duration >= self.active_room_threshold:
+            if not self.is_active:
+                self.is_active = True
+                self.data[f"{self.room_name}_active_room_status"] = True
+                logCoordinator.debug(
+                    "Room %s activated after %s seconds",
+                    self.room_name,
+                    occupancy_duration,
+                )
+        elif not is_occupied and self.is_active:
+            self.is_active = False
+            self.data[f"{self.room_name}_active_room_status"] = False
+            logCoordinator.debug("Room %s deactivated due to absence", self.room_name)
 
     async def set_active_room_status(self, active: bool):
         """Set the active room status and update listeners."""
@@ -97,13 +117,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["night_mode_enabled"] = enabled
         self.data["night_mode_start"] = start
         self.data["night_mode_end"] = end
-        self.async_set_updated_data(self.data)
-
-    async def async_update_active_room_settings(self, timeout: int, threshold: int):
-        """Update active room settings."""
-        self.active_room.update_settings(timeout, threshold)
-        self.data["active_room_timeout"] = timeout
-        self.data["active_room_threshold"] = threshold
         self.async_set_updated_data(self.data)
 
     def get_entity_name(self, entity_type: str, name: str) -> str:
