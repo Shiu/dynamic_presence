@@ -309,10 +309,27 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 # Don't turn off yet, timeout not reached
                 return
 
-        # Check if we should turn on entities based on light level
-        should_activate = turn_on and self._is_room_dark()
+            service = "turn_off"
+        else:
+            # Check current state of entities before deciding to turn on
+            entities = self._get_controlled_entities()
+            any_on = False
+            for entity_id in entities:
+                if state := self.hass.states.get(entity_id):
+                    if state.state == "on":
+                        any_on = True
+                        break
 
-        service = "turn_on" if should_activate else "turn_off"
+            # If lights are already on, keep them on
+            if any_on:
+                return
+
+            # If lights are off, only turn on if room is dark
+            if not self._is_room_dark():
+                logCoordinator.debug("Room is bright enough, keeping lights off")
+                return
+
+            service = "turn_on"
 
         # Get the appropriate list of entities based on night mode and addmode
         entities = self._get_controlled_entities()

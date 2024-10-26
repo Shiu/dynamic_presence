@@ -8,14 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    CONF_ROOM_NAME,
-    DEFAULT_NIGHT_MODE_END,
-    DEFAULT_NIGHT_MODE_START,
-    DOMAIN,
-    TIME_DEFAULT_VALUES,
-    TIME_KEYS,
-)
+from .const import CONF_ROOM_NAME, DOMAIN, TIME_DEFAULT_VALUES, TIME_KEYS
 from .coordinator import DynamicPresenceCoordinator
 
 logTime = logging.getLogger("dynamic_presence.time")
