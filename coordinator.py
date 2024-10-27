@@ -19,14 +19,15 @@ from .const import (
     CONF_NIGHT_MODE_ENTITIES_ADDMODE,
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
+    DEFAULT_ACTIVE_ROOM_THRESHOLD,
     DEFAULT_LIGHT_THRESHOLD,
-    DEFAULT_NIGHT_MODE_END,
-    DEFAULT_NIGHT_MODE_START,
     DOMAIN,
     NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
     NIGHT_MODE_KEYS,
     NUMBER_CONFIG,
+    SWITCH_DEFAULT_STATES,
     SWITCH_KEYS,
+    TIME_DEFAULT_VALUES,
     TIME_KEYS,
 )
 from .presence_detector import PresenceDetector
@@ -65,17 +66,34 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
         )
 
+        # Initialize data with existing values or defaults
         self.data = {}
-        self.data["night_mode_start"] = DEFAULT_NIGHT_MODE_START
-        self.data["night_mode_end"] = DEFAULT_NIGHT_MODE_END
-        self.data[CONF_NIGHT_MODE_ENTITIES_ADDMODE] = (
-            NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE
-        )
+
+        # Get existing values from entry data and options
+        combined_data = {**entry.data, **entry.options}
+
+        # Time values
+        for key in TIME_KEYS:
+            self.data[key] = combined_data.get(key, TIME_DEFAULT_VALUES[key])
+
+        # Number values
+        for key, config in NUMBER_CONFIG.items():
+            self.data[key] = combined_data.get(key, config["default"])
+
+        # Switch values
+        for key in SWITCH_KEYS:
+            self.data[key] = combined_data.get(key, SWITCH_DEFAULT_STATES[key])
+
+        # Night mode values
+        for key in NIGHT_MODE_KEYS:
+            self.data[key] = combined_data.get(
+                key, NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE
+            )
 
         self.is_active = False
-        self.active_room_threshold = entry.options.get(CONF_ACTIVE_ROOM_THRESHOLD, 600)
-
-        self.update_data_from_options(entry.options)
+        self.active_room_threshold = combined_data.get(
+            CONF_ACTIVE_ROOM_THRESHOLD, DEFAULT_ACTIVE_ROOM_THRESHOLD
+        )
 
         # Set up event listener for presence sensor
         self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
@@ -178,25 +196,31 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     def update_data_from_options(self, options: dict):
         """Update coordinator data from options."""
+        # Only update values that are actually present in options
         for key in TIME_KEYS:
-            self.data[key] = options.get(key)
-        for key, config in NUMBER_CONFIG.items():
-            self.data[key] = options.get(key, config["default"])
-        for key in NIGHT_MODE_KEYS:
-            self.data[key] = options.get(key, NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE)
-        for key in SWITCH_KEYS:
-            new_value = options.get(key)
+            if key in options:
+                self.data[key] = options[key]
 
-            # If trying to enable manage_on_presence during night mode override
+        for key in NUMBER_CONFIG:
+            if key in options:
+                self.data[key] = options[key]
+
+        for key in NIGHT_MODE_KEYS:
+            if key in options:
+                self.data[key] = options[key]
+
+        for key in SWITCH_KEYS:
+            if key not in options:
+                continue
+
+            new_value = options[key]
             if (
                 key == "manage_on_presence"
                 and new_value is True
                 and self.data.get("night_mode_active")
                 and self.data.get("night_mode_override_on_presence")
             ):
-                # Store the attempted "on" state for later restoration
                 self._stored_manage_on_presence = True
-                # Keep it turned off
                 self.data[key] = False
                 continue
 
