@@ -24,6 +24,7 @@ from .const import (
     DEFAULT_NIGHT_MODE_START,
     DOMAIN,
     NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
+    NIGHT_MODE_KEYS,
     NUMBER_CONFIG,
     SWITCH_KEYS,
     TIME_KEYS,
@@ -67,6 +68,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data = {}
         self.data["night_mode_start"] = DEFAULT_NIGHT_MODE_START
         self.data["night_mode_end"] = DEFAULT_NIGHT_MODE_END
+        self.data[CONF_NIGHT_MODE_ENTITIES_ADDMODE] = (
+            NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE
+        )
+
         self.is_active = False
         self.active_room_threshold = entry.options.get(CONF_ACTIVE_ROOM_THRESHOLD, 600)
 
@@ -88,7 +93,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         if light_sensor := self.entry.data.get(CONF_LIGHT_SENSOR):
             if state := self.hass.states.get(light_sensor):
                 try:
-                    self.data[f"{self.room_name}_light_level"] = int(state.state)
+                    self.data[f"{self.room_name}_light_level"] = int(float(state.state))
                 except (ValueError, TypeError):
                     logCoordinator.warning(
                         "Invalid light level value from sensor %s: %s",
@@ -177,6 +182,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             self.data[key] = options.get(key)
         for key, config in NUMBER_CONFIG.items():
             self.data[key] = options.get(key, config["default"])
+        for key in NIGHT_MODE_KEYS:
+            self.data[key] = options.get(key, NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE)
         for key in SWITCH_KEYS:
             new_value = options.get(key)
 
@@ -236,6 +243,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.data["controlled_entities"] = entities
         new_options = dict(self.entry.options)
         new_options[CONF_CONTROLLED_ENTITIES] = entities
+
         self.hass.config_entries.async_update_entry(
             self.entry, data={**self.entry.data, CONF_CONTROLLED_ENTITIES: entities}
         )

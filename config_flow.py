@@ -115,47 +115,51 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
-        logConfigFlow.info("DynamicPresenceOptionsFlowHandler.async_step_init called")
         if user_input is not None:
-            logConfigFlow.info("Updating options with user input: %s", user_input)
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, options=user_input
-            )
+            # When saving options
             return self.async_create_entry(title="", data=user_input)
 
-        options = {**self.config_entry.data, **self.config_entry.options}
-        logConfigFlow.info("Current options: %s", options)
-        data_schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_PRESENCE_SENSOR, default=options.get(CONF_PRESENCE_SENSOR)
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["binary_sensor", "device_tracker"]
-                    )
+        # When opening options flow
+        schema_dict = {
+            vol.Required(
+                CONF_PRESENCE_SENSOR,
+                default=self.config_entry.data.get(CONF_PRESENCE_SENSOR),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["binary_sensor", "device_tracker"]
+                )
+            ),
+            vol.Required(
+                CONF_CONTROLLED_ENTITIES,
+                default=self.config_entry.data.get(CONF_CONTROLLED_ENTITIES, []),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["light", "switch", "input_boolean"], multiple=True
+                )
+            ),
+            vol.Optional(
+                CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
+                default=self.config_entry.data.get(
+                    CONF_NIGHT_MODE_CONTROLLED_ENTITIES, []
                 ),
-                vol.Required(
-                    CONF_CONTROLLED_ENTITIES,
-                    default=options.get(CONF_CONTROLLED_ENTITIES, []),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["light", "switch", "input_boolean"], multiple=True
-                    )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["light", "switch", "input_boolean"], multiple=True
+                )
+            ),
+            vol.Optional(
+                CONF_NIGHT_MODE_ENTITIES_ADDMODE,
+                default=self.config_entry.data.get(
+                    CONF_NIGHT_MODE_ENTITIES_ADDMODE, "exclusive"
                 ),
-                vol.Optional(
-                    CONF_NIGHT_MODE_CONTROLLED_ENTITIES
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["light", "switch", "input_boolean"], multiple=True
-                    )
-                ),
-                vol.Optional(CONF_NIGHT_MODE_ENTITIES_ADDMODE): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=["additive", "exclusive"])
-                ),
-                vol.Optional(CONF_LIGHT_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["sensor"])
-                ),
-            }
-        )
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=["additive", "exclusive"])
+            ),
+            vol.Optional(
+                CONF_LIGHT_SENSOR, default=self.config_entry.data.get(CONF_LIGHT_SENSOR)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["sensor"])
+            ),
+        }
 
-        return self.async_show_form(step_id="init", data_schema=data_schema)
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))
