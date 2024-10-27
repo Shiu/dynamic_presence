@@ -47,7 +47,8 @@
           "night_mode_end": "Night Mode End",
           "night_mode_scale": "Night Mode Scale",
           "night_mode_controlled_entities": "Night Mode Controlled Entities",
-          "night_mode_entities_addmode": "Night Mode Entities Add Mode"
+          "night_mode_entities_addmode": "Night Mode Entities Add Mode",
+          "night_mode_override_on_presence": "Night Mode Override On Presence"
         },
         "data_description": {
           "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
@@ -67,7 +68,8 @@
           "night_mode_end": "The time when night mode ends (HH:MM, 24-hour clock).",
           "night_mode_scale": "Scale factor for adjusting presence timeout during night mode.",
           "night_mode_controlled_entities": "Select entities to be controlled specifically during night mode.",
-          "night_mode_entities_addmode": "Choose how night mode entities behave: 'additive' or 'exclusive'."
+          "night_mode_entities_addmode": "Choose how night mode entities behave: 'additive' or 'exclusive'.",
+          "night_mode_override_on_presence": "Sets Manage On Presence to True during night mode."
         }
       }
     }

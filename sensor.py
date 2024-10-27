@@ -60,6 +60,13 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
+        if self._key.endswith("active_room_status"):
+            return "on" if self.coordinator.is_active else "off"
+        if self._key.endswith("night_mode_status"):
+            return (
+                "on" if self.coordinator.data.get("night_mode_active", False) else "off"
+            )
+
         value = self.coordinator.data.get(self._key)
         if "duration" in self._key:
             return int(value) if value is not None else 0
@@ -82,3 +89,43 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
+
+
+class DynamicPresenceActiveRoomSensor(DynamicPresenceSensor):
+    """Active Room Status sensor for Dynamic Presence."""
+
+    def __init__(
+        self,
+        coordinator: DynamicPresenceCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, config_entry)
+        self._attr_name = f"{self.room_name} Active Room Status"
+        self._attr_unique_id = f"{self.room_name}_active_room_status"
+        self._attr_native_value = "off"
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the sensor."""
+        return "on" if self.coordinator.is_active else "off"
+
+
+class DynamicPresenceNightModeSensor(DynamicPresenceSensor):
+    """Night Mode Status sensor for Dynamic Presence."""
+
+    def __init__(
+        self,
+        coordinator: DynamicPresenceCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, config_entry)
+        self._attr_name = f"{self.room_name} Night Mode Status"
+        self._attr_unique_id = f"{self.room_name}_night_mode_status"
+        self._attr_native_value = "off"
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the sensor."""
+        return "on" if self.coordinator.data.get("night_mode_active", False) else "off"

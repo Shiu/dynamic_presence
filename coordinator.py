@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ACTIVE_ROOM_THRESHOLD,
@@ -44,7 +45,7 @@ class MessageFilter(logging.Filter):
 
 
 logCoordinator = logging.getLogger("dynamic_presence.coordinator")
-# logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
+logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
 
 
 class DynamicPresenceCoordinator(DataUpdateCoordinator):
@@ -76,6 +77,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
         self.presence_detector = PresenceDetector(hass, entry, self)
+        self._stored_manage_on_presence = None
         self.entities = {}
 
     async def _async_update_data(self):
@@ -103,6 +105,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
         # Check active room status
         await self._check_active_room_status()
+
+        # Update night mode status
+        self.data["night_mode_active"] = self._is_night_mode_active()
+        self._handle_night_mode_override()
 
         return self.data
 
@@ -172,13 +178,22 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         for key, config in NUMBER_CONFIG.items():
             self.data[key] = options.get(key, config["default"])
         for key in SWITCH_KEYS:
-            self.data[key] = options.get(key)
+            new_value = options.get(key)
 
-        # Update specific thresholds
-        self.active_room_threshold = options.get(
-            CONF_ACTIVE_ROOM_THRESHOLD, self.active_room_threshold
-        )
-        self.data["active_room_threshold"] = self.active_room_threshold
+            # If trying to enable manage_on_presence during night mode override
+            if (
+                key == "manage_on_presence"
+                and new_value is True
+                and self.data.get("night_mode_active")
+                and self.data.get("night_mode_override_on_presence")
+            ):
+                # Store the attempted "on" state for later restoration
+                self._stored_manage_on_presence = True
+                # Keep it turned off
+                self.data[key] = False
+                continue
+
+            self.data[key] = new_value
 
     async def async_update_options(self, _: HomeAssistant, entry: ConfigEntry) -> None:
         """Update coordinator data from options."""
@@ -244,20 +259,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             else self.data.get("presence_timeout")
         )
 
-        if self.data.get("night_mode_enable"):
-            current_time = datetime.now().strftime("%H:%M")
-            start = self.data.get("night_mode_start")
-            end = self.data.get("night_mode_end")
-
-            # Check if current time is within night mode hours
-            if start <= end:
-                is_night_mode = start <= current_time < end
-            else:  # Handles case where night mode spans midnight
-                is_night_mode = current_time >= start or current_time < end
-
-            if is_night_mode:
-                scale = self.data.get("night_mode_scale", 0.5)
-                return int(base_timeout * scale)
+        if self.data.get("night_mode_enable") and self.data.get(
+            "night_mode_active", False
+        ):
+            scale = self.data.get("night_mode_scale", 0.5)
+            return int(base_timeout * scale)
 
         return base_timeout
 
@@ -266,20 +272,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         regular_entities = self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
         night_entities = self.entry.data.get(CONF_NIGHT_MODE_CONTROLLED_ENTITIES, [])
 
-        if not self.data.get("night_mode_enable"):
-            return regular_entities
-
-        # Check if current time is within night mode hours
-        current_time = datetime.now().strftime("%H:%M")
-        start = self.data.get("night_mode_start")
-        end = self.data.get("night_mode_end")
-
-        if start <= end:
-            is_night_mode = start <= current_time < end
-        else:  # Handles case where night mode spans midnight
-            is_night_mode = current_time >= start or current_time < end
-
-        if not is_night_mode:
+        if not self.data.get("night_mode_enable") or not self.data.get(
+            "night_mode_active", False
+        ):
             return regular_entities
 
         # We're in night mode, handle entities based on addmode
@@ -342,3 +337,56 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 logCoordinator.debug("%s %s", service, entity_id)
             except (ValueError, TimeoutError) as e:
                 logCoordinator.error("Failed to %s %s: %s", service, entity_id, str(e))
+
+    def _is_night_mode_active(self) -> bool:
+        """Check if current time is within night mode hours."""
+        if not self.data.get("night_mode_enable"):
+            logCoordinator.debug("Night mode not enabled")
+            return False
+
+        start = self.data.get("night_mode_start")
+        end = self.data.get("night_mode_end")
+
+        if not start or not end:
+            logCoordinator.warning("Night mode start or end time not set")
+            return False
+
+        current_time = dt_util.now().strftime("%H:%M")
+        start = start[:5] if len(start) > 5 else start
+        end = end[:5] if len(end) > 5 else end
+
+        logCoordinator.debug(
+            "Night mode check - Enable: %s, Current: %s, Start: %s, End: %s",
+            self.data.get("night_mode_enable"),
+            current_time,
+            start,
+            end,
+        )
+
+        if start <= end:
+            is_active = start <= current_time < end
+        else:  # Handles case where night mode spans midnight
+            is_active = current_time >= start or current_time < end
+
+        logCoordinator.debug("Night mode active: %s", is_active)
+        return is_active
+
+    def _handle_night_mode_override(self) -> None:
+        """Handle night mode override for manage on presence."""
+        if (
+            self.data.get("night_mode_enable")
+            and self.data.get("night_mode_active")
+            and self.data.get("night_mode_override_on_presence")
+        ):
+            if self._stored_manage_on_presence is None:
+                self._stored_manage_on_presence = self.data.get(
+                    "manage_on_presence", True
+                )
+                self.data["manage_on_presence"] = False
+                self.async_set_updated_data(self.data)
+                logCoordinator.debug("Night mode override: disabled manage_on_presence")
+        elif self._stored_manage_on_presence is not None:
+            self.data["manage_on_presence"] = self._stored_manage_on_presence
+            self._stored_manage_on_presence = None
+            self.async_set_updated_data(self.data)
+            logCoordinator.debug("Night mode override: restored manage_on_presence")
