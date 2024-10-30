@@ -172,7 +172,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             .lower()
             .replace(" ", "_")
         )
-        return f"{entity_type}.{room_name}_{name.lower().replace(' ', '_')}"
+        return f"{entity_type}.dynamic_presence_{room_name}_{name.lower().replace(' ', '_')}"
 
     def get_device_info(self, room: str) -> dict:
         """Return device info for the given room."""
@@ -363,10 +363,18 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
         for entity_id in entities:
             try:
-                await self.hass.services.async_call(
-                    "homeassistant", service, {"entity_id": entity_id}
-                )
-                logCoordinator.debug("%s %s", service, entity_id)
+                current_state = self.hass.states.get(entity_id)
+                if current_state is None:
+                    continue
+
+                # Only send command if state needs to change
+                if (service == "turn_on" and current_state.state == "off") or (
+                    service == "turn_off" and current_state.state == "on"
+                ):
+                    await self.hass.services.async_call(
+                        "homeassistant", service, {"entity_id": entity_id}
+                    )
+                    logCoordinator.debug("%s %s", service, entity_id)
             except (ValueError, TimeoutError) as e:
                 logCoordinator.error("Failed to %s %s: %s", service, entity_id, str(e))
 
