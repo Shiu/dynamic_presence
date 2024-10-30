@@ -31,16 +31,19 @@ class DynamicPresenceNumber(NumberEntity):
         self.coordinator = coordinator
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{description.key}"
-        self._attr_has_entity_name = True
-        self._attr_name = description.name
-        self.entity_id = f"number.dynamic_presence_{room}_{description.key}"
+        self._attr_name = f"dynamic_presence_{room}_{description.key}".replace(
+            "_", " "
+        ).title()
+        self._attr_entity_id = f"number.dynamic_presence_{room}_{description.key}"
+        self._attr_device_info = coordinator.get_device_info(room)
+
+        # Number-specific attributes
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_native_min_value = description.native_min_value
         self._attr_native_max_value = description.native_max_value
         self._attr_native_step = description.native_step
         self._attr_mode = description.mode
-        self._attr_device_info = coordinator.get_device_info(room)
-        self._attr_native_value = coordinator.data.get(self.entity_description.key)
+        self._attr_native_value = coordinator.data.get(description.key)
 
     @property
     def unique_id(self):

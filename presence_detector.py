@@ -105,7 +105,7 @@ class PresenceDetector:
                 logPresenceDetector.debug("Absence confirmed, occupancy timer reset")
 
         self.coordinator.data[f"{self.coordinator.room_name}_occupancy_state"] = (
-            "occupied" if self.presence_detected else "vacant"
+            "on" if self.presence_detected else "off"
         )
 
         await self.coordinator.manage_entities(turn_on=self.presence_detected)
@@ -119,3 +119,9 @@ class PresenceDetector:
         self.presence_timeout = options.get(
             CONF_PRESENCE_TIMEOUT, self.presence_timeout
         )
+
+    def is_presence_detected(self) -> bool:
+        """Check if presence is currently detected."""
+        if state := self.hass.states.get(self.presence_sensor):
+            return state.state == "on"
+        return False

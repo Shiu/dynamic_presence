@@ -26,25 +26,29 @@ class DynamicPresenceTime(TimeEntity):
         """Initialize the Dynamic Presence time entity."""
         super().__init__()
         self.coordinator = coordinator
-        self.room = room
         self.entity_description = description
-        self._key = description.key
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{description.key}"
-        self._attr_has_entity_name = True
-        self._attr_name = description.name
-        self.entity_id = f"time.dynamic_presence_{room}_{description.key}"
+        self._attr_name = f"dynamic_presence_{room}_{description.key}".replace(
+            "_", " "
+        ).title()
+        self._attr_entity_id = f"time.dynamic_presence_{room}_{description.key}"
         self._attr_device_info = coordinator.get_device_info(room)
-        self._default_time = TIME_DEFAULT_VALUES.get(description.key)
+
+        # Time-specific attributes
+        self._attr_native_value = coordinator.data.get(description.key)
 
     @property
     def native_value(self):
         """Return the time value."""
-        return self.coordinator.data.get(self._key)
+        value = self.coordinator.data.get(self.entity_description.key)
+        if isinstance(value, str):
+            return value
+        return None
 
     async def async_set_value(self, value: time) -> None:
         """Set the time."""
         time_str = value.isoformat()
-        await self.coordinator.async_save_options(self._key, time_str)
+        await self.coordinator.async_save_options(self.entity_description.key, time_str)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""

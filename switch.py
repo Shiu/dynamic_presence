@@ -10,7 +10,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_ROOM_NAME, DOMAIN, SWITCH_DEFAULT_STATES, SWITCH_KEYS
+from .const import (
+    CONF_ROOM_NAME,
+    DOMAIN,
+    SWITCH_DEFAULT_STATES,
+    SWITCH_KEYS,
+)
 from .coordinator import DynamicPresenceCoordinator
 
 logSwitch = logging.getLogger("dynamic_presence.switch")
@@ -26,12 +31,17 @@ class DynamicPresenceSwitch(SwitchEntity):
         switch_key: str,
     ) -> None:
         """Initialize the Dynamic Presence switch."""
+        super().__init__()
         self.coordinator = coordinator
-        self._room = room
         self._switch_key = switch_key
-        self._attr_name = switch_key.replace("_", " ").title()
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{switch_key}"
+        self._attr_name = f"dynamic_presence_{room}_{switch_key}".replace(
+            "_", " "
+        ).title()
+        self._attr_entity_id = f"switch.dynamic_presence_{room}_{switch_key}"
         self._attr_device_info = coordinator.get_device_info(room)
+
+        # Switch-specific attributes
         self._default_state = SWITCH_DEFAULT_STATES.get(switch_key, False)
         self._attr_is_on = coordinator.data.get(switch_key, self._default_state)
 

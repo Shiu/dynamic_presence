@@ -49,13 +49,35 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
     ) -> None:
         """Initialize the Dynamic Presence sensor."""
         super().__init__(coordinator)
+        self.coordinator = coordinator
         self._key = f"{room}_{key}"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{self._key}"
-        self._attr_has_entity_name = True
-        self._attr_name = name
-        self.entity_id = f"sensor.dynamic_presence_{self._key}"
-        self._attr_native_unit_of_measurement = unit
+        self._attr_name = f"dynamic_presence_{room}_{key}".replace("_", " ").title()
+        self._attr_entity_id = f"sensor.dynamic_presence_{self._key}"
         self._attr_device_info = coordinator.get_device_info(room)
+        self._attr_native_unit_of_measurement = unit
+
+        # Set appropriate device class, state class and icon based on sensor type
+        if "duration" in self._key:
+            self._attr_device_class = SensorDeviceClass.DURATION
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_icon = "mdi:timer-outline"
+        elif "light_level" in self._key:
+            self._attr_device_class = SensorDeviceClass.ILLUMINANCE
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_icon = "mdi:brightness-5"
+        elif "active_room_status" in self._key:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["on", "off"]
+            self._attr_icon = "mdi:home-circle"
+        elif "night_mode_status" in self._key:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["on", "off"]
+            self._attr_icon = "mdi:weather-night"
+        elif "occupancy_state" in self._key:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["on", "off"]
+            self._attr_icon = "mdi:motion-sensor"
 
     @property
     def native_value(self):
@@ -66,66 +88,14 @@ class DynamicPresenceSensor(CoordinatorEntity, SensorEntity):
             return (
                 "on" if self.coordinator.data.get("night_mode_active", False) else "off"
             )
+        if self._key.endswith("occupancy_state"):
+            return self.coordinator.data.get(self._key, "off")
 
         value = self.coordinator.data.get(self._key)
         if "duration" in self._key:
             return int(value) if value is not None else 0
         return value
 
-    @property
-    def state_class(self):
-        """Return the state class of the sensor."""
-        if "duration" in self._key:
-            return SensorStateClass.MEASUREMENT
-        return None
-
-    @property
-    def device_class(self):
-        """Return the device class of the sensor."""
-        if "duration" in self._key:
-            return SensorDeviceClass.DURATION
-        return None
-
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
-
-
-class DynamicPresenceActiveRoomSensor(DynamicPresenceSensor):
-    """Active Room Status sensor for Dynamic Presence."""
-
-    def __init__(
-        self,
-        coordinator: DynamicPresenceCoordinator,
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator, config_entry)
-        self._attr_name = f"{self.room_name} Active Room Status"
-        self._attr_unique_id = f"{self.room_name}_active_room_status"
-        self._attr_native_value = "off"
-
-    @property
-    def native_value(self) -> str:
-        """Return the state of the sensor."""
-        return "on" if self.coordinator.is_active else "off"
-
-
-class DynamicPresenceNightModeSensor(DynamicPresenceSensor):
-    """Night Mode Status sensor for Dynamic Presence."""
-
-    def __init__(
-        self,
-        coordinator: DynamicPresenceCoordinator,
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator, config_entry)
-        self._attr_name = f"{self.room_name} Night Mode Status"
-        self._attr_unique_id = f"{self.room_name}_night_mode_status"
-        self._attr_native_value = "off"
-
-    @property
-    def native_value(self) -> str:
-        """Return the state of the sensor."""
-        return "on" if self.coordinator.data.get("night_mode_active", False) else "off"

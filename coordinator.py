@@ -72,23 +72,14 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         # Get existing values from entry data and options
         combined_data = {**entry.data, **entry.options}
 
-        # Time values
-        for key in TIME_KEYS:
-            self.data[key] = combined_data.get(key, TIME_DEFAULT_VALUES[key])
-
-        # Number values
-        for key, config in NUMBER_CONFIG.items():
-            self.data[key] = combined_data.get(key, config["default"])
-
-        # Switch values
-        for key in SWITCH_KEYS:
-            self.data[key] = combined_data.get(key, SWITCH_DEFAULT_STATES[key])
-
-        # Night mode values
-        for key in NIGHT_MODE_KEYS:
-            self.data[key] = combined_data.get(
-                key, NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE
-            )
+        # Initialize all configuration values
+        for key, default in {
+            **TIME_DEFAULT_VALUES,
+            **{k: v["default"] for k, v in NUMBER_CONFIG.items()},
+            **SWITCH_DEFAULT_STATES,
+            **{k: NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE for k in NIGHT_MODE_KEYS},
+        }.items():
+            self.data[key] = combined_data.get(key, default)
 
         self.is_active = False
         self.active_room_threshold = combined_data.get(
@@ -244,18 +235,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         new_data[key] = value
 
         # Update coordinator's internal state
-        if key in NUMBER_CONFIG:
-            # Handle number inputs
-            setattr(self, key, value)
-        elif key in SWITCH_KEYS:
-            # Handle switch inputs
-            setattr(self, key, value)
-        elif key in TIME_KEYS:
-            # Handle time inputs
-            setattr(self, key, value)
-
-        self.data[key] = value  # Update coordinator data
-        self.async_set_updated_data(self.data)  # Notify listeners
+        self.data[key] = value
+        self.async_set_updated_data(self.data)
 
         # Save to config entry
         self.hass.config_entries.async_update_entry(
@@ -326,6 +307,14 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
         if not turn_on and not self.data.get("manage_on_clear", True):
             return
+
+        # Re-enable manage_on_clear when presence detected
+        if self.presence_detector.is_presence_detected():
+            if not self.data.get("manage_on_clear", True):
+                await self.async_save_options("manage_on_clear", True)
+                logCoordinator.debug(
+                    "Re-enabled manage_on_clear due to presence detection"
+                )
 
         # For turning off, check if absence duration has exceeded timeout
         if not turn_on:
