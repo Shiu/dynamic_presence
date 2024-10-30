@@ -127,7 +127,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         new_night_mode = self._is_night_mode_active()
         if new_night_mode != self.data.get("night_mode_active"):
             new_data["night_mode_active"] = new_night_mode
-            self._handle_night_mode_override()
+
+        # Always check night mode override
+        self._handle_night_mode_override()
 
         # Only update if data has actually changed
         if new_data != self.data:
@@ -403,20 +405,30 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     def _handle_night_mode_override(self) -> None:
         """Handle night mode override for manage on presence."""
-        if (
+        night_mode_override_active = (
             self.data.get("night_mode_enable")
             and self.data.get("night_mode_active")
             and self.data.get("night_mode_override_on_presence")
-        ):
-            if self._stored_manage_on_presence is None:
-                self._stored_manage_on_presence = self.data.get(
-                    "manage_on_presence", True
-                )
+        )
+
+        if night_mode_override_active:
+            # Force disable manage_on_presence during night mode override
+            if self.data.get("manage_on_presence"):
+                self._stored_manage_on_presence = True
+                new_options = dict(self.entry.options)
+                new_options["manage_on_presence"] = False
                 self.data["manage_on_presence"] = False
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
                 self.async_set_updated_data(self.data)
                 logCoordinator.debug("Night mode override: disabled manage_on_presence")
-        elif self._stored_manage_on_presence is not None:
-            self.data["manage_on_presence"] = self._stored_manage_on_presence
+        elif self._stored_manage_on_presence:
+            # Restore previous state when night mode override ends
+            new_options = dict(self.entry.options)
+            new_options["manage_on_presence"] = True
+            self.data["manage_on_presence"] = True
+            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
             self._stored_manage_on_presence = None
             self.async_set_updated_data(self.data)
             logCoordinator.debug("Night mode override: restored manage_on_presence")
