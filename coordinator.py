@@ -97,33 +97,42 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Update data from presence detector."""
         current_time = datetime.now()
+        new_data = dict(self.data)
 
         # Update light level if sensor is configured
         if light_sensor := self.entry.data.get(CONF_LIGHT_SENSOR):
             if state := self.hass.states.get(light_sensor):
                 try:
-                    self.data[f"{self.room_name}_light_level"] = int(float(state.state))
+                    new_light_level = int(float(state.state))
+                    if new_light_level != self.data.get(
+                        f"{self.room_name}_light_level"
+                    ):
+                        new_data[f"{self.room_name}_light_level"] = new_light_level
                 except (ValueError, TypeError):
                     logCoordinator.warning(
                         "Invalid light level value from sensor %s: %s",
                         light_sensor,
                         state.state,
                     )
-                    self.data[f"{self.room_name}_light_level"] = None
+                    new_data[f"{self.room_name}_light_level"] = None
 
-        # Update presence state
+        # Update presence state and durations
         await self.presence_detector.update_presence()
-
-        # Update durations
         await self.presence_detector.calculate_durations(current_time)
 
         # Check active room status
         await self._check_active_room_status()
 
         # Update night mode status
-        self.data["night_mode_active"] = self._is_night_mode_active()
-        self._handle_night_mode_override()
+        new_night_mode = self._is_night_mode_active()
+        if new_night_mode != self.data.get("night_mode_active"):
+            new_data["night_mode_active"] = new_night_mode
+            self._handle_night_mode_override()
 
+        # Only update if data has actually changed
+        if new_data != self.data:
+            self.data = new_data
+            return new_data
         return self.data
 
     async def _check_active_room_status(self):
