@@ -99,6 +99,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.presence_sensor = entry.data[CONF_PRESENCE_SENSOR]
         hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_state_change)
 
+        # Add listener for controlled entities
+        hass.bus.async_listen(EVENT_STATE_CHANGED, self._handle_entity_state_change)
+
         self.presence_detector = PresenceDetector(hass, entry, self)
         self._stored_manage_on_presence = None
         self.entities = {}
@@ -430,3 +433,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             self._stored_manage_on_presence = None
             self.async_set_updated_data(self.data)
             logCoordinator.debug("Night mode override: restored manage_on_presence")
+
+    async def _handle_entity_state_change(self, event):
+        """Handle state changes for controlled entities."""
+        entity_id = event.data.get("entity_id")
+        if entity_id in self._get_controlled_entities():
+            new_state = event.data.get("new_state")
+            if new_state and new_state.context.user_id is not None:
+                logCoordinator.debug("Manual change detected for %s", entity_id)

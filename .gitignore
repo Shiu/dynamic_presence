@@ -3,3 +3,5 @@ __pycache__/
 *.py[cod]
 project-details.txt
 .vscode/sftp.json
+.vscode/launch.json
+.vscode/tasks.json
