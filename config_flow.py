@@ -24,6 +24,8 @@ from .const import (
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
     DOMAIN,
+    CONF_REMOTE_CONTROL_TIMEOUT,
+    DEFAULT_REMOTE_CONTROL_TIMEOUT,
 )
 
 logConfigFlow = logging.getLogger("dynamic_presence.config_flow")
@@ -51,6 +53,10 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> DynamicPresenceOptionsFlowHandler:
         """Get the options flow for this handler."""
         return DynamicPresenceOptionsFlowHandler(config_entry)
+
+    def is_matching(self, other_flow: dict) -> bool:
+        """Return True if other_flow matches this flow."""
+        return False  # We don't use discovery, so always return False
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -160,6 +166,12 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["sensor"])
             ),
+            vol.Optional(
+                CONF_REMOTE_CONTROL_TIMEOUT,
+                default=self.config_entry.data.get(
+                    CONF_REMOTE_CONTROL_TIMEOUT, DEFAULT_REMOTE_CONTROL_TIMEOUT
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

@@ -1,21 +1,180 @@
 {
     "version": "2.0.0",
     "tasks": [
-      {
-        "label": "Run Home Assistant Core",
-        "type": "shell",
-        "command": "/bin/bash",
-        "args": [
-          "-c",
-          "source /home/shiu/dev/homeassistant-core/venv/bin/activate && hass -c /home/shiu/dev/homeassistant-core/config"
-        ],
-        "group": "test",
-        "presentation": {
-          "reveal": "always",
-          "panel": "new"
+        {
+            "label": "Run Home Assistant Core",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/hass",
+            "args": [
+                "-c",
+                "/workspaces/homeassistant-core/config"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "dependsOn": ["Compile English translations"]
         },
-        "problemMatcher": []
-      }
+        {
+            "label": "Pytest",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/python3",
+            "args": ["-m", "pytest", "--timeout=10", "tests"],
+            "dependsOn": ["Install all Test Requirements"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Pytest (changed tests only)",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/python3",
+            "args": ["-m", "pytest", "--timeout=10", "--picked"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ruff",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/pre-commit",
+            "args": ["run", "ruff", "--all-files"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Pylint",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/pylint",
+            "args": ["homeassistant"],
+            "dependsOn": ["Install all Requirements"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Code Coverage",
+            "detail": "Generate code coverage report for a given integration.",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/python3",
+            "args": [
+                "-m",
+                "pytest",
+                "./tests/components/${input:integrationName}/",
+                "--cov=homeassistant.components.${input:integrationName}",
+                "--cov-report",
+                "term-missing",
+                "--durations-min=1",
+                "--durations=0",
+                "--numprocesses=auto"
+            ],
+            "dependsOn": ["Compile English translations"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Generate Requirements",
+            "type": "shell",
+            "command": "./script/gen_requirements_all.py",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Install all Requirements",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/uv",
+            "args": ["pip", "install", "-r", "requirements_all.txt"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile English translations",
+            "detail": "In order to test changes to translation files, the translation strings must be compiled into Home Assistant's translation directories.",
+            "type": "shell",
+            "command": "/home/vscode/.local/ha-venv/bin/python3",
+            "args": [
+                "-m",
+                "script.translations",
+                "develop",
+                "--all"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "options": {
+                "cwd": "/workspaces/homeassistant-core"
+            },
+            "problemMatcher": []
+        }
     ]
-  }
-  
+}

@@ -14,6 +14,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import CONF_ROOM_NAME, DOMAIN, SENSOR_KEYS
 from .coordinator import DynamicPresenceCoordinator
 
+# pylint: disable=E1120  # No value for argument in method call
+# pylint: disable=E1101  # Instance has no member
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback

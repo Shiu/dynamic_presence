@@ -14,6 +14,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_NIGHT_MODE_SCALE, CONF_ROOM_NAME, DOMAIN, NUMBER_CONFIG
 from .coordinator import DynamicPresenceCoordinator
 
+# pylint: disable=W0223  # Method 'set_native_value' is abstract
+# pylint: disable=W0239  # Method 'set_value' overrides final
+
 logNumber = logging.getLogger("dynamic_presence.number")
 
 

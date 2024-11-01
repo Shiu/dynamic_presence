@@ -23,6 +23,7 @@ CONF_NIGHT_MODE_START = "night_mode_start"
 CONF_NIGHT_MODE_END = "night_mode_end"
 CONF_LIGHT_THRESHOLD = "light_threshold"
 CONF_NIGHT_MODE_OVERRIDE_ON_PRESENCE = "night_mode_override_on_presence"
+CONF_REMOTE_CONTROL_TIMEOUT = "remote_control_timeout"
 
 DEFAULT_PRESENCE_TIMEOUT = 180
 DEFAULT_ACTIVE_ROOM_THRESHOLD = 600
@@ -38,6 +39,7 @@ DEFAULT_NIGHT_MODE_ENABLE = True
 DEFAULT_LIGHT_THRESHOLD = 100
 DEFAULT_NIGHT_MODE_ENTITIES_ADDMODE = NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE
 DEFAULT_NIGHT_MODE_OVERRIDE_ON_PRESENCE = False
+DEFAULT_REMOTE_CONTROL_TIMEOUT = 60
 
 NUMBER_CONFIG = {
     CONF_PRESENCE_TIMEOUT: {
@@ -88,6 +90,15 @@ NUMBER_CONFIG = {
         "unit": "lx",
         "default": DEFAULT_LIGHT_THRESHOLD,
     },
+    CONF_REMOTE_CONTROL_TIMEOUT: {
+        "name": "Remote Control Timeout",
+        "icon": "mdi:timer-outline",
+        "default": DEFAULT_REMOTE_CONTROL_TIMEOUT,
+        "min": 0,
+        "max": 3600,
+        "step": 1,
+        "unit": "seconds",
+    },
 }
 
 SWITCH_KEYS = [
@@ -128,6 +139,7 @@ SENSOR_KEYS = [
     "night_mode_status",
     "occupancy_duration",
     "occupancy_state",
+    "remote_control_duration",
 ]
 
 NIGHT_MODE_KEYS = [
