@@ -24,6 +24,8 @@ from .const import (
     CONF_PRESENCE_SENSOR,
     CONF_ROOM_NAME,
     DOMAIN,
+    NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
+    NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
 )
 
 logConfigFlow = logging.getLogger("dynamic_presence.config_flow")
@@ -93,8 +95,15 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
                         domain=["light", "switch", "input_boolean"], multiple=True
                     )
                 ),
-                vol.Optional(CONF_NIGHT_MODE_ENTITIES_ADDMODE): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=["additive", "exclusive"])
+                vol.Optional(
+                    CONF_NIGHT_MODE_ENTITIES_ADDMODE,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
+                            NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
+                        ]
+                    )
                 ),
                 vol.Optional(CONF_LIGHT_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor"])
@@ -159,12 +168,13 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
             ),
             vol.Optional(
                 CONF_NIGHT_MODE_ENTITIES_ADDMODE,
-                default=self.config_entry.options.get(
-                    CONF_NIGHT_MODE_ENTITIES_ADDMODE,
-                    self.config_entry.data.get(CONF_NIGHT_MODE_ENTITIES_ADDMODE),
-                ),
             ): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=["additive", "exclusive"])
+                selector.SelectSelectorConfig(
+                    options=[
+                        NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
+                        NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
+                    ]
+                )
             ),
             vol.Optional(
                 CONF_LIGHT_SENSOR,

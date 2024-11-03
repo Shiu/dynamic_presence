@@ -465,13 +465,22 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         regular_entities = self.entry.options.get(CONF_CONTROLLED_ENTITIES, [])
         night_entities = self.entry.options.get(CONF_NIGHT_MODE_CONTROLLED_ENTITIES, [])
 
+        # If night mode is not enabled or not active, use regular entities
         if not self.data.get("night_mode_enable") or not self._is_night_mode_active():
             return regular_entities
 
+        # Get the add mode setting
         addmode = self.entry.options.get(CONF_NIGHT_MODE_ENTITIES_ADDMODE)
+
+        # In exclusive mode:
+        # - If night entities exist, use only those
+        # - If no night entities, fall back to regular entities
         if addmode == NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE:
-            return night_entities if night_entities else regular_entities
-        # ADDITIVE
+            if night_entities:
+                return night_entities
+            return regular_entities
+
+        # In additive mode, combine both lists
         return list(set(regular_entities + night_entities))
 
     def _get_current_timeout(self) -> int:
