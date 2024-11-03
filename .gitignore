@@ -1,0 +1,9 @@
+# Python and general ignore rules
+__pycache__/
+*.py[cod]
+project-details.txt
+pytest.ini
+sftp.json
+launch.json
+tasks.json
+DESIGN.md
