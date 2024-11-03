@@ -24,6 +24,7 @@ from .const import (
     DEFAULT_LIGHT_THRESHOLD,
     DEFAULT_REMOTE_CONTROL_TIMEOUT,
     DOMAIN,
+    NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
     NIGHT_MODE_ENTITIES_ADDMODE_EXCLUSIVE,
     NIGHT_MODE_KEYS,
     NUMBER_CONFIG,
@@ -462,15 +463,22 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     def _get_controlled_entities(self) -> list:
         """Get the list of entities to control based on night mode and addmode."""
-        regular_entities = self.entry.options.get(CONF_CONTROLLED_ENTITIES, [])
-        night_entities = self.entry.options.get(CONF_NIGHT_MODE_CONTROLLED_ENTITIES, [])
+        regular_entities = self.entry.options.get(
+            CONF_CONTROLLED_ENTITIES, self.entry.data.get(CONF_CONTROLLED_ENTITIES, [])
+        )
+        night_entities = self.entry.options.get(
+            CONF_NIGHT_MODE_CONTROLLED_ENTITIES,
+            self.entry.data.get(CONF_NIGHT_MODE_CONTROLLED_ENTITIES, []),
+        )
 
         # If night mode is not enabled or not active, use regular entities
         if not self.data.get("night_mode_enable") or not self._is_night_mode_active():
             return regular_entities
 
-        # Get the add mode setting
-        addmode = self.entry.options.get(CONF_NIGHT_MODE_ENTITIES_ADDMODE)
+        # Get the add mode setting with default to additive
+        addmode = self.entry.options.get(
+            CONF_NIGHT_MODE_ENTITIES_ADDMODE, NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE
+        )
 
         # In exclusive mode:
         # - If night entities exist, use only those

@@ -97,6 +97,7 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_NIGHT_MODE_ENTITIES_ADDMODE,
+                    default=NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
@@ -168,6 +169,7 @@ class DynamicPresenceOptionsFlowHandler(OptionsFlow):
             ),
             vol.Optional(
                 CONF_NIGHT_MODE_ENTITIES_ADDMODE,
+                default=NIGHT_MODE_ENTITIES_ADDMODE_ADDITIVE,
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
