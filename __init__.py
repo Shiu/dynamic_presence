@@ -16,7 +16,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import CONF_ADJACENT_ROOMS, DOMAIN
 from .coordinator import DynamicPresenceCoordinator
 
 PLATFORMS = [
@@ -43,11 +43,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_clear_adjacent_room_references(
+    hass: HomeAssistant, removed_entry_id: str
+) -> None:
+    """Remove references to a room from all other rooms' adjacent rooms lists."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+
+    for entry in entries:
+        if entry.entry_id != removed_entry_id:  # Skip the room being removed
+            adjacent_rooms = entry.options.get(CONF_ADJACENT_ROOMS, [])
+            if removed_entry_id in adjacent_rooms:
+                # Remove the deleted room from adjacent_rooms
+                new_adjacent_rooms = [
+                    room for room in adjacent_rooms if room != removed_entry_id
+                ]
+                new_options = dict(entry.options)
+                new_options[CONF_ADJACENT_ROOMS] = new_adjacent_rooms
+
+                # Update the config entry
+                hass.config_entries.async_update_entry(
+                    entry,
+                    options=new_options,
+                )
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        await async_clear_adjacent_room_references(hass, entry.entry_id)
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok

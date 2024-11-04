@@ -1,6 +1,8 @@
 """Constants for the Dynamic Presence integration."""
 
-DOMAIN = "dynamic_presence"
+from typing import Final
+
+DOMAIN: Final = "dynamic_presence"
 
 # Configuration keys
 CONF_ROOM_NAME = "room_name"

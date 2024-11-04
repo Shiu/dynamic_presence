@@ -8,7 +8,12 @@ import voluptuous as vol
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    OptionsFlow,
+    ConfigEntryState,
+)
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
@@ -97,6 +102,15 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
         """Initialize options flow."""
         self.config_entry = config_entry
 
+    def _get_adjacent_room_options(self) -> list[selector.SelectOptionDict]:
+        """Get list of available adjacent rooms."""
+        return [
+            selector.SelectOptionDict(value=entry.entry_id, label=entry.title)
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+            if entry.entry_id != self.config_entry.entry_id
+            and entry.state == ConfigEntryState.LOADED  # Only show active rooms
+        ]
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -163,13 +177,7 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                     default=self.config_entry.options.get(CONF_ADJACENT_ROOMS, []),
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[
-                            selector.SelectOptionDict(
-                                value=entry.entry_id, label=entry.title
-                            )
-                            for entry in self.hass.config_entries.async_entries(DOMAIN)
-                            if entry.entry_id != self.config_entry.entry_id
-                        ],
+                        options=self._get_adjacent_room_options(),
                         multiple=True,
                         mode="dropdown",
                     )
