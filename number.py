@@ -1,111 +1,120 @@
 """Number platform for Dynamic Presence integration."""
 
-# pylint: disable=W0223  # Method 'set_native_value' is abstract
-# pylint: disable=W0239  # Method 'set_value' overrides final
-# type: ignore[shadow-stdlib]
+from __future__ import annotations
 
-import logging
-
-from homeassistant.components.number import (
-    NumberEntity,
-    NumberEntityDescription,
-    NumberMode,
-)
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTime, LIGHT_LUX
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_NIGHT_MODE_SCALE, CONF_ROOM_NAME, DOMAIN, NUMBER_CONFIG
+from .const import (
+    DOMAIN,
+    CONF_DETECTION_TIMEOUT,
+    CONF_LONG_TIMEOUT,
+    CONF_SHORT_TIMEOUT,
+    CONF_LIGHT_THRESHOLD,
+    CONF_LIGHT_SENSOR,
+)
 from .coordinator import DynamicPresenceCoordinator
 
-logNumber = logging.getLogger("dynamic_presence.number")
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up numbers from a config entry."""
+    coordinator: DynamicPresenceCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    entities = [
+        DynamicPresenceNumber(
+            coordinator=coordinator,
+            unique_id=f"{entry.entry_id}_detection_timeout",
+            key=CONF_DETECTION_TIMEOUT,
+            native_min_value=1,
+            native_max_value=30,
+            native_step=1,
+            native_unit_of_measurement=UnitOfTime.SECONDS,
+        ),
+        DynamicPresenceNumber(
+            coordinator=coordinator,
+            unique_id=f"{entry.entry_id}_long_timeout",
+            key=CONF_LONG_TIMEOUT,
+            native_min_value=30,
+            native_max_value=3600,
+            native_step=30,
+            native_unit_of_measurement=UnitOfTime.SECONDS,
+        ),
+        DynamicPresenceNumber(
+            coordinator=coordinator,
+            unique_id=f"{entry.entry_id}_short_timeout",
+            key=CONF_SHORT_TIMEOUT,
+            native_min_value=10,
+            native_max_value=300,
+            native_step=10,
+            native_unit_of_measurement=UnitOfTime.SECONDS,
+        ),
+    ]
+
+    # Only add light threshold if light sensor is configured
+    if coordinator.light_sensor or entry.options.get(CONF_LIGHT_SENSOR):
+        entities.append(
+            DynamicPresenceNumber(
+                coordinator=coordinator,
+                unique_id=f"{entry.entry_id}_light_threshold",
+                key=CONF_LIGHT_THRESHOLD,
+                native_min_value=0,
+                native_max_value=1000,
+                native_step=10,
+                native_unit_of_measurement=LIGHT_LUX,
+            )
+        )
+
+    async_add_entities(entities)
 
 
-class DynamicPresenceNumber(NumberEntity):
-    """Representation of a Dynamic Presence number setting."""
+class DynamicPresenceNumber(  # pylint: disable=abstract-method
+    CoordinatorEntity[DynamicPresenceCoordinator], NumberEntity
+):
+    """Number entity for Dynamic Presence."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_mode = NumberMode.BOX
 
     def __init__(
         self,
         coordinator: DynamicPresenceCoordinator,
-        room: str,
-        description: NumberEntityDescription,
+        unique_id: str,
+        key: str,
+        native_min_value: float,
+        native_max_value: float,
+        native_step: float,
+        native_unit_of_measurement: str | None = None,
     ) -> None:
-        """Initialize the Dynamic Presence number entity."""
-        super().__init__()
-        self.coordinator = coordinator
-        self.entity_description = description
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{room}_{description.key}"
-        self._attr_name = f"dynamic_presence_{room}_{description.key}".replace(
-            "_", " "
-        ).title()
-        self._attr_entity_id = f"number.dynamic_presence_{room}_{description.key}"
-        self._attr_device_info = coordinator.get_device_info(room)
-
-        # Number-specific attributes
-        self._attr_native_unit_of_measurement = description.native_unit_of_measurement
-        self._attr_native_min_value = description.native_min_value
-        self._attr_native_max_value = description.native_max_value
-        self._attr_native_step = description.native_step
-        self._attr_mode = description.mode
-        self._attr_native_value = coordinator.data.get(description.key)
+        """Initialize the number."""
+        super().__init__(coordinator)
+        self._attr_unique_id = unique_id
+        self._attr_suggested_object_id = key
+        self._attr_translation_key = key
+        self._key = key
+        self._attr_native_min_value = native_min_value
+        self._attr_native_max_value = native_max_value
+        self._attr_native_step = native_step
+        self._attr_native_unit_of_measurement = native_unit_of_measurement
+        self._attr_device_info = coordinator.device_info
 
     @property
-    def unique_id(self):
-        """Return the unique ID for the entity."""
-        return self._attr_unique_id
-
-    @property
-    def native_value(self):
+    def native_value(self) -> float | None:
         """Return the current value."""
-        value = self.coordinator.data.get(self.entity_description.key)
-        if isinstance(value, float) and value.is_integer():
-            return int(value)
-        return value
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.get(
+            f"number_{self._key}", self.coordinator.entry.options.get(self._key)
+        )
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set new value."""
-        if isinstance(value, float) and value.is_integer():
-            value = int(value)
-        await self.coordinator.async_save_options(self.entity_description.key, value)
-
-    async def async_added_to_hass(self):
-        """When entity is added to hass."""
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
-        )
-
-    async def async_update_config(self, options: dict) -> None:
-        """Update the entity's configuration."""
-        if self._attr_native_value != options.get(self.entity_description.key):
-            self._attr_native_value = options.get(self.entity_description.key)
-            self.async_write_ha_state()
-
-
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
-    """Set up Dynamic Presence number entities based on a config entry."""
-    room_name = entry.data.get(CONF_ROOM_NAME, "Unknown Room").lower().replace(" ", "_")
-
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-
-    entities = []
-    for key, config in NUMBER_CONFIG.items():
-        entity = DynamicPresenceNumber(
-            coordinator,
-            room_name,
-            NumberEntityDescription(
-                key=key,
-                name=config["name"],
-                native_min_value=config["min"],
-                native_max_value=config["max"],
-                native_step=config["step"],
-                native_unit_of_measurement=config["unit"],
-                mode=NumberMode.BOX
-                if key != CONF_NIGHT_MODE_SCALE
-                else NumberMode.SLIDER,
-            ),
-        )
-        entities.append(entity)
-
-    async_add_entities(entities)
+        """Update the current value."""
+        await self.coordinator.async_number_changed(self._key, value)
