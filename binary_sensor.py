@@ -62,4 +62,4 @@ class DynamicPresenceBinarySensor(  # pylint: disable=abstract-method
     @property
     def is_on(self) -> bool | None:
         """Return true if occupied."""
-        return self.coordinator.data.get(self._key)
+        return self.coordinator.data.get(f"binary_sensor_{self._key}")

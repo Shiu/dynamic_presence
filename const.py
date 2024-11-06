@@ -51,7 +51,7 @@ NUMBER_CONFIG = {
     CONF_DETECTION_TIMEOUT: {
         "name": "Detection Timeout",
         "min": 1,
-        "max": 30,
+        "max": 100,
         "step": 1,
         "unit": "seconds",
         "default": DEFAULT_DETECTION_TIMEOUT,

@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 import logging
-from enum import Enum
 from typing import Any, Dict
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +14,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
+from .presence_control import PresenceControl, RoomState
 from .const import (
     DOMAIN,
     CONF_PRESENCE_SENSOR,
@@ -54,16 +54,6 @@ logCoordinator = logging.getLogger("dynamic_presence.coordinator")
 logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
 
 
-class RoomState(Enum):
-    """Room state machine states."""
-
-    VACANT = "vacant"
-    OCCUPIED = "occupied"
-    DETECTION_TIMEOUT = "detection_timeout"
-    COUNTDOWN = "countdown"
-    UNCONFIGURED = "unconfigured"
-
-
 class DynamicPresenceCoordinator(DataUpdateCoordinator):
     """Coordinator for room presence management."""
 
@@ -86,15 +76,14 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
         # Track configuration state
         self._is_configured = bool(self.presence_sensor and self.lights)
-        if not self._is_configured:
-            self._state = RoomState.UNCONFIGURED
 
         self.night_lights = entry.options.get(CONF_NIGHT_LIGHTS, [])
         self.light_sensor = entry.options.get(CONF_LIGHT_SENSOR)
 
+        # Initialize state machine
+        self._presence_control = PresenceControl(hass, self._handle_state_changed)
+
         # State management
-        self._state = RoomState.VACANT
-        self._last_presence_time = None
         self._manual_states = {}
 
         # Timers
@@ -174,43 +163,51 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data."""
-        # Preserve existing data
         updated_data = self.data.copy() if self.data else {}
-
-        # Update binary sensors
-        updated_data["binary_sensor_occupancy"] = self._state == RoomState.OCCUPIED
-
-        # Update sensors
-        if self._state == RoomState.OCCUPIED and self._last_presence_time:
-            updated_data["sensor_occupancy_duration"] = int(
-                (dt_util.utcnow() - self._last_presence_time).total_seconds()
-            )
-            updated_data["sensor_absence_duration"] = 0
-        elif self._last_presence_time and self._state != RoomState.OCCUPIED:
-            updated_data["sensor_absence_duration"] = int(
-                (dt_util.utcnow() - self._last_presence_time).total_seconds()
-            )
-            updated_data["sensor_occupancy_duration"] = 0
-
-        # Update light level if sensor configured
-        if self.light_sensor:
-            state = self.hass.states.get(self.light_sensor)
-            if state:
-                try:
-                    updated_data["sensor_light_level"] = float(state.state)
-                except (ValueError, TypeError):
-                    pass
-
-        # Update state machine info
-        updated_data.update(
-            {
-                "state": self._state.value,
-                "last_presence": self._last_presence_time,
-                "manual_states": self._manual_states.copy(),
-            }
+        current_time = dt_util.utcnow()
+        last_presence_time = self._presence_control.last_presence_time
+        detection_timeout_end = getattr(
+            self._presence_control, "_detection_timeout_end", None
         )
 
+        # Update occupancy binary sensor - True for both OCCUPIED and DETECTION_TIMEOUT states
+        updated_data["binary_sensor_occupancy"] = self._presence_control.state in [
+            RoomState.OCCUPIED,
+            RoomState.DETECTION_TIMEOUT,
+        ]
+
+        # Handle duration sensors
+        if last_presence_time is None:
+            updated_data["sensor_occupancy_duration"] = 0
+            updated_data["sensor_absence_duration"] = 0
+        elif self._presence_control.state in [
+            RoomState.OCCUPIED,
+            RoomState.DETECTION_TIMEOUT,
+        ]:
+            updated_data["sensor_occupancy_duration"] = int(
+                (current_time - last_presence_time).total_seconds()
+            )
+            updated_data["sensor_absence_duration"] = 0
+        elif self._presence_control.state in [
+            RoomState.COUNTDOWN,
+            RoomState.VACANT,
+        ]:
+            updated_data["sensor_occupancy_duration"] = 0
+            if detection_timeout_end:
+                # Start counting from when detection timeout ended
+                updated_data["sensor_absence_duration"] = self._detection_timeout + int(
+                    (current_time - detection_timeout_end).total_seconds()
+                )
+
         return updated_data
+
+    async def _handle_state_changed(self, new_state: RoomState) -> None:
+        """Handle state machine state changes."""
+        if new_state == RoomState.OCCUPIED:
+            await self._apply_light_states()
+        elif new_state == RoomState.VACANT:
+            await self._turn_off_lights()
+        await self.async_refresh()
 
     async def _async_presence_changed(self, event) -> None:
         """Handle presence sensor state changes."""
@@ -218,77 +215,83 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         if new_state is None:
             return
 
+        logCoordinator.debug(
+            "Presence sensor changed to: %s (current state: %s)",
+            new_state.state,
+            self._presence_control.state.value,
+        )
+
         if new_state.state == STATE_ON:
-            await self._handle_presence_detected()
+            await self._on_presence_sensor_activated()
         else:
-            await self._handle_presence_lost()
+            await self._on_presence_sensor_deactivated()
 
-    async def _handle_presence_detected(self) -> None:
-        """Handle presence detection."""
-        self._last_presence_time = dt_util.utcnow()
+    async def _on_presence_sensor_activated(self) -> None:
+        """Handle presence sensor turning ON."""
+        await self._presence_control.handle_presence_detected()
         self._cancel_timers()
-
-        if self._state != RoomState.OCCUPIED:
-            self._state = RoomState.OCCUPIED
-            await self._apply_light_states()
-
         await self.async_refresh()
 
-    async def _handle_presence_lost(self) -> None:
-        """Handle loss of presence."""
-        if self._state == RoomState.OCCUPIED:
-            self._state = RoomState.DETECTION_TIMEOUT
-            self._start_detection_timer()
-
+    async def _on_presence_sensor_deactivated(self) -> None:
+        """Handle presence sensor turning OFF."""
+        await self._presence_control.handle_presence_lost()
+        self._start_detection_timer()
         await self.async_refresh()
 
     def _cancel_timers(self) -> None:
         """Cancel all active timers."""
         if self._detection_timer:
-            self._detection_timer()
+            logCoordinator.debug("Cancelling detection timer")
+            self._detection_timer.cancel()
             self._detection_timer = None
         if self._countdown_timer:
-            self._countdown_timer()
+            logCoordinator.debug("Cancelling countdown timer")
+            self._countdown_timer.cancel()
             self._countdown_timer = None
 
     def _start_detection_timer(self) -> None:
         """Start the detection timeout timer."""
+        logCoordinator.debug(
+            "Starting detection timer for %s seconds", self._detection_timeout
+        )
         self._cancel_timers()
         self._detection_timer = self.hass.loop.call_later(
             self._detection_timeout,
-            self.hass.async_create_task,
-            self._handle_detection_timeout(),
+            lambda: self.hass.async_create_task(self._on_detection_timer_expired()),
         )
-
-    async def _handle_detection_timeout(self) -> None:
-        """Handle detection timeout expiration."""
-        self._detection_timer = None
-        if self._state == RoomState.DETECTION_TIMEOUT:
-            self._state = RoomState.COUNTDOWN
-            self._start_countdown_timer()
-            await self.async_refresh()
 
     def _start_countdown_timer(self) -> None:
         """Start the vacancy countdown timer."""
         self._cancel_timers()
         timeout = self._short_timeout if self._is_night_mode() else self._long_timeout
+        # Subtract detection timeout since we've already waited that long
+        adjusted_timeout = timeout - self._detection_timeout
+        logCoordinator.debug(
+            "Starting countdown timer for %s seconds", adjusted_timeout
+        )
         self._countdown_timer = self.hass.loop.call_later(
-            timeout,
-            self.hass.async_create_task,
-            self._handle_countdown_timeout(),
+            adjusted_timeout,
+            lambda: self.hass.async_create_task(self._on_countdown_timer_expired()),
         )
 
-    async def _handle_countdown_timeout(self) -> None:
-        """Handle countdown timeout expiration."""
+    async def _on_detection_timer_expired(self) -> None:
+        """Handle detection timer expiration."""
+        logCoordinator.debug("Detection timer expired")
+        self._detection_timer = None
+        await self._presence_control.transition_to_countdown()
+        self._start_countdown_timer()
+        await self.async_refresh()
+
+    async def _on_countdown_timer_expired(self) -> None:
+        """Handle countdown timer expiration."""
+        logCoordinator.debug("Countdown timer expired")
         self._countdown_timer = None
-        if self._state == RoomState.COUNTDOWN:
-            self._state = RoomState.VACANT
-            await self._turn_off_lights()
-            await self.async_refresh()
+        await self._presence_control.transition_to_vacant()
+        await self.async_refresh()
 
     async def _async_light_changed(self, event) -> None:
         """Handle light state changes."""
-        if self._state == RoomState.OCCUPIED:
+        if self._presence_control.state == RoomState.OCCUPIED:
             entity_id = event.data.get("entity_id")
             new_state = event.data.get("new_state")
             if new_state is not None:
@@ -338,7 +341,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.hass.config_entries.async_update_entry(self.entry, options=new_options)
         self.async_set_updated_data(self.data)
 
-    # These methods now just call the common method with the appropriate type
     async def async_switch_changed(self, key: str, value: bool) -> None:
         """Handle switch changes."""
         await self.async_entity_changed("switch", key, value)

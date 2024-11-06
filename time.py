@@ -68,7 +68,7 @@ class DynamicPresenceTime(  # pylint: disable=abstract-method
         self._attr_suggested_object_id = key
         self._attr_translation_key = key
         self._key = key
-        self._default_time = f"{default_time}:00"
+        self._default_time = f"{default_time}"
         self._attr_device_info = coordinator.device_info
 
     @property
