@@ -4,10 +4,11 @@ from enum import Enum
 import logging
 from typing import Dict, Any, TYPE_CHECKING
 
+
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.event import async_call_later
-from homeassistant.helpers.template import TemplateError
+from homeassistant.const import STATE_ON
 from homeassistant.util import dt as dt_util
 
 
@@ -36,16 +37,13 @@ class PresenceControl:
     ) -> None:
         """Initialize the presence controller."""
         self.hass = hass
-        self.coordinator = coordinator
+        self._coordinator = coordinator
         self._state = RoomState.VACANT
         self._last_presence_time = None
         self._occupancy_start_time = None
         self._last_logged_state = None
         self._detection_timer = None
         self._countdown_timer = None
-        logPresenceControl.debug(
-            "Presence control initialized in %s state", self._state.value
-        )
 
     @property
     @callback
@@ -85,39 +83,17 @@ class PresenceControl:
         if (
             durations["sensor_occupancy_duration"] % 30 == 0
         ) or self._last_logged_state != self.state:
-            logPresenceControl.debug(
-                "Duration update - State: %s, Occupancy: %d, Absence: %d",
-                self.state.value,
-                durations["sensor_occupancy_duration"],
-                durations["sensor_absence_duration"],
-            )
             self._last_logged_state = self.state
 
         return durations
 
     async def handle_presence_event(self, event) -> None:
         """Handle presence sensor state changes."""
-        logPresenceControl.debug(
-            "Received presence event: %s",
-            {
-                "event_data": event.data,
-                "event_type": getattr(event, "event_type", None),
-            },
-        )
+        logPresenceControl.debug("Received presence event: %s", event.data)
 
         new_state = event.data.get("new_state")
-        logPresenceControl.debug("Extracted new_state: %s", new_state)
-
         if new_state is None:
-            logPresenceControl.debug("No new_state in event, ignoring")
             return
-
-        # Log detailed state information
-        logPresenceControl.debug(
-            "Presence sensor state details: state=%s, attributes=%s",
-            getattr(new_state, "state", None),
-            getattr(new_state, "attributes", {}),
-        )
 
         logPresenceControl.debug(
             "Current state: %s, New presence state: %s",
@@ -131,9 +107,7 @@ class PresenceControl:
             else:
                 await self._on_presence_sensor_deactivated()
         except (HomeAssistantError, ServiceNotFound) as err:
-            logPresenceControl.warning(
-                "Error handling presence event: %s", err, exc_info=True
-            )
+            logPresenceControl.warning("Error handling presence event: %s", err)
 
     @callback
     def _cancel_detection_timer(self) -> None:
@@ -152,18 +126,24 @@ class PresenceControl:
     @callback
     def _cancel_timers(self) -> None:
         """Cancel all active timers."""
-        self._cancel_detection_timer()
-        self._cancel_countdown_timer()
+        if self._detection_timer:
+            self._detection_timer()
+            self._detection_timer = None
+
+        if self._countdown_timer:
+            self._countdown_timer()
+            self._countdown_timer = None
+
         logPresenceControl.debug("All timers cancelled")
 
     @callback
     def _start_detection_timer(self) -> None:
         """Start the detection timeout timer."""
         if self._detection_timer:
-            self._detection_timer.cancel()
+            self._detection_timer()
+            self._detection_timer = None
 
-        detection_timeout = self.coordinator.detection_timeout
-
+        detection_timeout = self._coordinator.detection_timeout
         self._detection_timer = async_call_later(
             self.hass, detection_timeout, self._detection_timer_finished
         )
@@ -172,39 +152,32 @@ class PresenceControl:
             detection_timeout,
         )
 
-    async def _detection_timer_finished(self, _now) -> None:
-        """Handle detection timer completion."""
-        self._detection_timer = None
-        await self.handle_detection_timeout()
-
     @callback
     def _start_countdown_timer(self) -> None:
         """Start the countdown timer."""
-        if self._countdown_timer:
-            self._countdown_timer.cancel()
+        if self._countdown_timer is not None:
+            self._countdown_timer()
+            self._countdown_timer = None
 
-        timeout = (
-            self.coordinator.short_timeout
-            if self.coordinator.is_night_mode()
-            else self.coordinator.long_timeout
+        base_timeout = (
+            self._coordinator.short_timeout
+            if self._coordinator.is_night_mode()
+            else self._coordinator.long_timeout
         )
 
+        # Subtract detection timeout from the countdown period
+        adjusted_timeout = max(0, base_timeout - self._coordinator.detection_timeout)
+
         self._countdown_timer = async_call_later(
-            self.hass, timeout, self._countdown_timer_finished
+            self.hass, adjusted_timeout, self._countdown_timer_finished
         )
         logPresenceControl.debug(
             "Starting countdown timer for %s seconds",
-            timeout,
+            adjusted_timeout,
         )
 
-    async def _countdown_timer_finished(self, _now) -> None:
-        """Handle countdown timer completion."""
-        self._countdown_timer = None
-        await self.handle_countdown_finished()
-
     async def _on_presence_sensor_activated(self) -> None:
-        """Handle presence sensor turning ON."""
-        self._cancel_timers()  # Cancel all timers when presence detected
+        """Handle presence sensor activation."""
         await self.handle_presence_detected()
 
     async def _on_presence_sensor_deactivated(self) -> None:
@@ -212,73 +185,74 @@ class PresenceControl:
         await self.handle_presence_lost()
 
     async def handle_presence_detected(self) -> None:
-        """Handle presence detection from any state."""
-        try:
-            if self._state != RoomState.DETECTION_TIMEOUT:
-                self._last_presence_time = dt_util.utcnow()
-                self._occupancy_start_time = (
-                    self._last_presence_time
-                )  # Set occupancy start
-                logPresenceControl.debug(
-                    "Updated presence time to %s", self._last_presence_time
-                )
-
-            # Cancel any running timers
+        """Handle presence detection."""
+        if self._state != RoomState.OCCUPIED:
+            logPresenceControl.debug("Presence detected - transitioning to occupied")
             self._cancel_timers()
-            await self.transition_to(RoomState.OCCUPIED)
-
-        except (HomeAssistantError, ServiceNotFound) as err:
-            logPresenceControl.warning(
-                "Failed to handle presence detection: %s", err, exc_info=True
-            )
-            raise
+            await self._update_state(RoomState.OCCUPIED)
+        else:
+            logPresenceControl.debug("Already in occupied state")
 
     async def handle_presence_lost(self) -> None:
         """Handle loss of presence from OCCUPIED state."""
         if self._state == RoomState.OCCUPIED:
             self._last_presence_time = dt_util.utcnow()
-            await self.transition_to(RoomState.DETECTION_TIMEOUT)
-            self._start_detection_timer()
+
+            # Check if any lights are on before starting detection timer
+            any_lights_on = False
+            for light in self._coordinator.active_lights:
+                try:
+                    state = self.hass.states.get(light)
+                    if state and state.state == STATE_ON:
+                        any_lights_on = True
+                        break
+                except HomeAssistantError as err:
+                    logPresenceControl.error("Error checking light state: %s", err)
+
+            if any_lights_on:
+                await self._update_state(RoomState.DETECTION_TIMEOUT)
+                self._start_detection_timer()
+            else:
+                logPresenceControl.debug("All lights already off - room is vacant")
+                await self._update_state(RoomState.VACANT)
         else:
-            logPresenceControl.warning(
-                "Invalid state transition: Cannot handle presence lost from %s state",
+            logPresenceControl.debug(
+                "Ignoring presence lost in %s state",
                 self._state.value,
             )
 
     async def update_timers(self, control_type: str, key: str) -> None:
-        """Update running timers when control values change.
-
-        Args:
-            control_type: Type of control being updated (e.g., "number")
-            key: Control key being updated (e.g., "detection_timeout")
-        """
+        """Update running timers when control values change."""
         try:
             if (
                 self._state == RoomState.DETECTION_TIMEOUT
                 and key == "detection_timeout"
             ):
                 logPresenceControl.debug(
-                    "Updating detection timer due to timeout change: %s",
-                    self.coordinator.data["number_detection_timeout"],
+                    "Updating detection timer: %s seconds",
+                    self._coordinator.detection_timeout,
                 )
                 self._start_detection_timer()
             elif self._state == RoomState.COUNTDOWN and key in [
                 "long_timeout",
                 "short_timeout",
             ]:
+                timeout = (
+                    self._coordinator.short_timeout
+                    if self._coordinator.is_night_mode()
+                    else self._coordinator.long_timeout
+                )
                 logPresenceControl.debug(
-                    "Updating countdown timer due to timeout change: %s/%s",
-                    self.coordinator.data["number_long_timeout"],
-                    self.coordinator.data["number_short_timeout"],
+                    "Updating countdown timer: %s seconds",
+                    timeout,
                 )
                 self._start_countdown_timer()
-        except (HomeAssistantError, TemplateError) as err:
+        except (HomeAssistantError, ServiceNotFound) as err:
             logPresenceControl.warning(
                 "Error updating timers for %s.%s: %s",
                 control_type,
                 key,
                 err,
-                exc_info=True,
             )
 
     async def start_detection_timer(self) -> None:
@@ -292,47 +266,78 @@ class PresenceControl:
     async def handle_detection_timeout(self) -> None:
         """Handle detection timeout completion."""
         if self.state == RoomState.DETECTION_TIMEOUT:
-            logPresenceControl.debug("Detection timeout expired, starting countdown")
-            await self.transition_to(RoomState.COUNTDOWN)
-            self._start_countdown_timer()
+            # Check if any lights are still on
+            any_lights_on = False
+            for light in self._coordinator.active_lights:
+                try:
+                    state = self.hass.states.get(light)
+                    if state and state.state == STATE_ON:
+                        any_lights_on = True
+                        break
+                except HomeAssistantError as err:
+                    logPresenceControl.error("Error checking light state: %s", err)
 
-    async def handle_countdown_finished(self) -> None:
-        """Handle countdown timer completion."""
-        if self.state == RoomState.COUNTDOWN:
-            logPresenceControl.debug("Countdown finished, room is now vacant")
-            await self.transition_to(RoomState.VACANT)
-            # Here we'll add light control logic later
+            if any_lights_on:
+                logPresenceControl.debug(
+                    "Detection timeout expired, starting countdown"
+                )
+                await self._update_state(RoomState.COUNTDOWN)
+                self._start_countdown_timer()
+            else:
+                logPresenceControl.debug(
+                    "Detection timeout expired, all lights off - clearing manual states"
+                )
+                await self._coordinator.clear_manual_states()
+                logPresenceControl.debug("Room is now vacant")
+                await self._update_state(RoomState.VACANT)
 
-    async def transition_to(self, new_state: RoomState) -> None:
-        """Handle state transitions with validation."""
-        if new_state == self.state:
+    async def _update_state(self, new_state: RoomState) -> None:
+        """Update state and notify coordinator."""
+        if new_state == self._state:
             return
 
         # Validate state transition
         valid_transitions = {
             RoomState.VACANT: [RoomState.OCCUPIED],
-            RoomState.OCCUPIED: [RoomState.DETECTION_TIMEOUT],
+            RoomState.OCCUPIED: [RoomState.DETECTION_TIMEOUT, RoomState.VACANT],
             RoomState.DETECTION_TIMEOUT: [RoomState.OCCUPIED, RoomState.COUNTDOWN],
             RoomState.COUNTDOWN: [RoomState.OCCUPIED, RoomState.VACANT],
         }
 
-        if new_state not in valid_transitions[self.state]:
+        if new_state not in valid_transitions[self._state]:
             logPresenceControl.warning(
                 "Invalid state transition attempted: %s -> %s",
-                self.state.value,
+                self._state.value,
                 new_state.value,
             )
             return
 
-        old_state = self.state
-        self._state = new_state
-
         logPresenceControl.info(
             "State transition: %s -> %s (last presence: %s)",
-            old_state.value,
+            self._state.value,
             new_state.value,
             self._last_presence_time,
         )
 
-        # Update coordinator data
-        await self.coordinator.async_refresh()
+        self._state = new_state
+        logPresenceControl.debug("Notifying coordinator of state change")
+
+        try:
+            await self._coordinator.handle_state_changed(new_state)
+        except (HomeAssistantError, ServiceNotFound) as err:
+            logPresenceControl.error("Error notifying coordinator: %s", err)
+
+    async def _countdown_timer_finished(self, _now) -> None:
+        """Handle countdown timer completion."""
+        self._countdown_timer = None
+        if self._state == RoomState.COUNTDOWN:
+            logPresenceControl.debug("Countdown finished, room is now vacant")
+            await self._update_state(RoomState.VACANT)
+
+    async def _detection_timer_finished(self, _now) -> None:
+        """Handle detection timer completion."""
+        self._detection_timer = None
+        if self._state == RoomState.DETECTION_TIMEOUT:
+            logPresenceControl.debug("Detection timeout expired, starting countdown")
+            await self._update_state(RoomState.COUNTDOWN)
+            self._start_countdown_timer()

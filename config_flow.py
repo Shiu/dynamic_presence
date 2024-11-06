@@ -19,6 +19,9 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 from homeassistant.helpers.entity_registry import async_get
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+)
 
 from .const import (
     DOMAIN,
@@ -31,14 +34,11 @@ from .const import (
     CONF_LONG_TIMEOUT,
     CONF_SHORT_TIMEOUT,
     CONF_LIGHT_THRESHOLD,
-    DEFAULT_DETECTION_TIMEOUT,
-    DEFAULT_LONG_TIMEOUT,
-    DEFAULT_SHORT_TIMEOUT,
-    DEFAULT_LIGHT_THRESHOLD,
     CONF_NIGHT_MODE_START,
     CONF_NIGHT_MODE_END,
     DEFAULT_NIGHT_MODE_START,
     DEFAULT_NIGHT_MODE_END,
+    NUMBER_CONFIG,
 )
 
 
@@ -64,9 +64,16 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
                 options={
                     CONF_PRESENCE_SENSOR: None,
                     CONF_LIGHTS: [],
-                    CONF_DETECTION_TIMEOUT: DEFAULT_DETECTION_TIMEOUT,
-                    CONF_LONG_TIMEOUT: DEFAULT_LONG_TIMEOUT,
-                    CONF_SHORT_TIMEOUT: DEFAULT_SHORT_TIMEOUT,
+                    CONF_DETECTION_TIMEOUT: NUMBER_CONFIG[CONF_DETECTION_TIMEOUT][
+                        "default"
+                    ],
+                    CONF_LONG_TIMEOUT: NUMBER_CONFIG[CONF_LONG_TIMEOUT]["default"],
+                    CONF_SHORT_TIMEOUT: NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["default"],
+                    CONF_LIGHT_THRESHOLD: NUMBER_CONFIG[CONF_LIGHT_THRESHOLD][
+                        "default"
+                    ],
+                    CONF_NIGHT_MODE_START: DEFAULT_NIGHT_MODE_START,
+                    CONF_NIGHT_MODE_END: DEFAULT_NIGHT_MODE_END,
                 },
             )
 
@@ -84,10 +91,26 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
         return False  # We don't support matching in this integration
 
     async def _async_validate_presence_sensor(self, entity_id: str) -> bool:
-        """Validate presence sensor entity."""
+        """Validate presence sensor entity and device class."""
         registry = async_get(self.hass)
         entity = registry.async_get(entity_id)
-        return entity is not None and entity.domain == BINARY_SENSOR_DOMAIN
+
+        if entity is None or entity.domain != BINARY_SENSOR_DOMAIN:
+            return False
+
+        # Get the entity state to check device class
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return False
+
+        device_class = state.attributes.get("device_class")
+        valid_device_classes = [
+            BinarySensorDeviceClass.MOTION,
+            BinarySensorDeviceClass.OCCUPANCY,
+            BinarySensorDeviceClass.PRESENCE,
+        ]
+
+        return device_class in valid_device_classes
 
     async def _async_validate_lights(self, entity_ids: list[str]) -> bool:
         """Validate light entities."""
@@ -184,39 +207,46 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_DETECTION_TIMEOUT,
                     default=self.config_entry.options.get(
-                        CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
+                        CONF_DETECTION_TIMEOUT,
+                        NUMBER_CONFIG[CONF_DETECTION_TIMEOUT]["default"],
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=1, max=30, mode="box", step=1, unit_of_measurement="seconds"
+                        min=NUMBER_CONFIG[CONF_DETECTION_TIMEOUT]["min"],
+                        max=NUMBER_CONFIG[CONF_DETECTION_TIMEOUT]["max"],
+                        mode="box",
+                        step=NUMBER_CONFIG[CONF_DETECTION_TIMEOUT]["step"],
+                        unit_of_measurement=NUMBER_CONFIG[CONF_DETECTION_TIMEOUT][
+                            "unit"
+                        ],
                     )
                 ),
                 vol.Required(
                     CONF_LONG_TIMEOUT,
                     default=self.config_entry.options.get(
-                        CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT
+                        CONF_LONG_TIMEOUT, NUMBER_CONFIG[CONF_LONG_TIMEOUT]["default"]
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=30,
-                        max=3600,
+                        min=NUMBER_CONFIG[CONF_LONG_TIMEOUT]["min"],
+                        max=NUMBER_CONFIG[CONF_LONG_TIMEOUT]["max"],
                         mode="box",
-                        step=30,
-                        unit_of_measurement="seconds",
+                        step=NUMBER_CONFIG[CONF_LONG_TIMEOUT]["step"],
+                        unit_of_measurement=NUMBER_CONFIG[CONF_LONG_TIMEOUT]["unit"],
                     )
                 ),
                 vol.Required(
                     CONF_SHORT_TIMEOUT,
                     default=self.config_entry.options.get(
-                        CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
+                        CONF_SHORT_TIMEOUT, NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["default"]
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=10,
-                        max=300,
+                        min=NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["min"],
+                        max=NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["max"],
                         mode="box",
-                        step=10,
-                        unit_of_measurement="seconds",
+                        step=NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["step"],
+                        unit_of_measurement=NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["unit"],
                     )
                 ),
                 # Light Settings - Group 3
@@ -229,11 +259,16 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_LIGHT_THRESHOLD,
                     default=self.config_entry.options.get(
-                        CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
+                        CONF_LIGHT_THRESHOLD,
+                        NUMBER_CONFIG[CONF_LIGHT_THRESHOLD]["default"],
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=0, max=1000, mode="box", step=10, unit_of_measurement="lux"
+                        min=NUMBER_CONFIG[CONF_LIGHT_THRESHOLD]["min"],
+                        max=NUMBER_CONFIG[CONF_LIGHT_THRESHOLD]["max"],
+                        mode="box",
+                        step=NUMBER_CONFIG[CONF_LIGHT_THRESHOLD]["step"],
+                        unit_of_measurement=NUMBER_CONFIG[CONF_LIGHT_THRESHOLD]["unit"],
                     )
                 ),
                 # Room Settings - Group 4

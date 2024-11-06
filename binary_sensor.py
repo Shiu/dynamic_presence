@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
     BinarySensorEntity,
+    BinarySensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -42,6 +42,7 @@ class DynamicPresenceBinarySensor(  # pylint: disable=abstract-method
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
 
     def __init__(
         self,

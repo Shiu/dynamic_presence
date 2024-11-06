@@ -17,6 +17,8 @@ CONF_DETECTION_TIMEOUT = "detection_timeout"
 CONF_LONG_TIMEOUT = "long_timeout"
 CONF_SHORT_TIMEOUT = "short_timeout"
 CONF_LIGHT_THRESHOLD = "light_threshold"
+CONF_NIGHT_MODE_START = "night_mode_start"
+CONF_NIGHT_MODE_END = "night_mode_end"
 
 # Switch configuration
 CONF_AUTOMATION = "automation"
@@ -27,18 +29,24 @@ CONF_NIGHT_MANUAL_ON = "night_manual_on"
 
 # Default values
 DEFAULT_DETECTION_TIMEOUT = 5  # seconds
-DEFAULT_LONG_TIMEOUT = 180  # 3 minutes
-DEFAULT_SHORT_TIMEOUT = 30  # 30 seconds
-DEFAULT_LIGHT_THRESHOLD = 10  # lux
+DEFAULT_LONG_TIMEOUT = 120  # 30 seconds
+DEFAULT_SHORT_TIMEOUT = 20  # 5 seconds
+DEFAULT_LIGHT_THRESHOLD = 100  # lux
 DEFAULT_NIGHT_MODE_START = "23:00:00"
 DEFAULT_NIGHT_MODE_END = "08:00:00"
 
-# Switch defaults
-DEFAULT_AUTOMATION = True
-DEFAULT_AUTO_ON = True
-DEFAULT_AUTO_OFF = True
-DEFAULT_NIGHT_MODE = True
-DEFAULT_NIGHT_MANUAL_ON = False
+# Default sensor values
+DEFAULT_SENSOR_OCCUPANCY_DURATION = 0
+DEFAULT_SENSOR_ABSENCE_DURATION = 0
+DEFAULT_SENSOR_LIGHT_LEVEL = 0
+DEFAULT_BINARY_SENSOR_OCCUPANCY = False
+
+# Default switch states
+DEFAULT_SWITCH_AUTOMATION = True
+DEFAULT_SWITCH_AUTO_ON = True
+DEFAULT_SWITCH_AUTO_OFF = True
+DEFAULT_SWITCH_NIGHT_MODE = True
+DEFAULT_SWITCH_NIGHT_MANUAL_ON = False
 
 # State constants
 STATE_OCCUPIED = "occupied"
@@ -51,7 +59,7 @@ NUMBER_CONFIG = {
     CONF_DETECTION_TIMEOUT: {
         "name": "Detection Timeout",
         "min": 1,
-        "max": 100,
+        "max": 120,
         "step": 1,
         "unit": "seconds",
         "default": DEFAULT_DETECTION_TIMEOUT,
@@ -75,8 +83,8 @@ NUMBER_CONFIG = {
     CONF_LIGHT_THRESHOLD: {
         "name": "Light Level Threshold",
         "min": 0,
-        "max": 1000,
-        "step": 10,
+        "max": 3600,
+        "step": 1,
         "unit": "lx",
         "default": DEFAULT_LIGHT_THRESHOLD,
     },
@@ -84,11 +92,11 @@ NUMBER_CONFIG = {
 
 # Switch configuration with defaults
 SWITCH_CONFIG = {
-    CONF_AUTOMATION: DEFAULT_AUTOMATION,
-    CONF_AUTO_ON: DEFAULT_AUTO_ON,
-    CONF_AUTO_OFF: DEFAULT_AUTO_OFF,
-    CONF_NIGHT_MODE: DEFAULT_NIGHT_MODE,
-    CONF_NIGHT_MANUAL_ON: DEFAULT_NIGHT_MANUAL_ON,
+    CONF_AUTOMATION: DEFAULT_SWITCH_AUTOMATION,
+    CONF_AUTO_ON: DEFAULT_SWITCH_AUTO_ON,
+    CONF_AUTO_OFF: DEFAULT_SWITCH_AUTO_OFF,
+    CONF_NIGHT_MODE: DEFAULT_SWITCH_NIGHT_MODE,
+    CONF_NIGHT_MANUAL_ON: DEFAULT_SWITCH_NIGHT_MANUAL_ON,
 }
 
 # Entity keys
@@ -100,11 +108,6 @@ SWITCH_KEYS = [
     CONF_NIGHT_MANUAL_ON,
 ]
 
-# Add these new constants
-CONF_NIGHT_MODE_START = "night_mode_start"
-CONF_NIGHT_MODE_END = "night_mode_end"
-
-# Update TIME_KEYS to use constants
 TIME_KEYS = [
     CONF_NIGHT_MODE_START,
     CONF_NIGHT_MODE_END,
@@ -118,4 +121,15 @@ SENSOR_KEYS = [
     "night_mode_status",
 ]
 
+# Storage
 STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}.storage"
+
+# Services
+SERVICE_CLEAR_MANUAL_STATES = "clear_manual_states"
+
+# Attributes
+ATTR_OCCUPANCY_DURATION = "occupancy_duration"
+ATTR_ABSENCE_DURATION = "absence_duration"
+ATTR_LIGHT_LEVEL = "light_level"
+ATTR_NIGHT_MODE = "night_mode"

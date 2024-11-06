@@ -5,7 +5,6 @@ import logging
 from typing import Any, Dict
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -13,10 +12,12 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.template import TemplateError
 from homeassistant.util import dt as dt_util
+from homeassistant.const import STATE_ON
 
 from .presence_control import PresenceControl, RoomState
 from .storage_collection import DynamicPresenceStorage
 from .const import (
+    DEFAULT_BINARY_SENSOR_OCCUPANCY,
     DOMAIN,
     CONF_PRESENCE_SENSOR,
     CONF_LIGHTS,
@@ -34,9 +35,32 @@ from .const import (
     DEFAULT_SHORT_TIMEOUT,
     CONF_LIGHT_THRESHOLD,
     DEFAULT_LIGHT_THRESHOLD,
+    DEFAULT_SENSOR_OCCUPANCY_DURATION,
+    DEFAULT_SENSOR_ABSENCE_DURATION,
+    DEFAULT_SENSOR_LIGHT_LEVEL,
+    DEFAULT_SWITCH_AUTOMATION,
+    DEFAULT_SWITCH_AUTO_ON,
+    DEFAULT_SWITCH_AUTO_OFF,
+    DEFAULT_SWITCH_NIGHT_MODE,
+    DEFAULT_SWITCH_NIGHT_MANUAL_ON,
 )
 
-logCoordinator = logging.getLogger(__name__)
+
+class MessageFilter(logging.Filter):
+    """Filter out specific messages."""
+
+    def __init__(self, *phrases) -> None:
+        """Initialize the filter."""
+        super().__init__()
+        self.phrases = phrases
+
+    def filter(self, record) -> bool:
+        """Filter out specific messages."""
+        return not any(phrase in record.msg for phrase in self.phrases)
+
+
+logCoordinator = logging.getLogger("dynamic_presence.coordinator")
+logCoordinator.addFilter(MessageFilter("Finished fetching", "Manually updated"))
 
 
 class DynamicPresenceCoordinator(DataUpdateCoordinator):
@@ -101,18 +125,21 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         # Runtime data initialization - only switches and sensors
         self.data = {
             # Binary sensors
-            "binary_sensor_occupancy": False,
+            "binary_sensor_occupancy": DEFAULT_BINARY_SENSOR_OCCUPANCY,
             # Sensors
-            "sensor_occupancy_duration": 0,
-            "sensor_absence_duration": 0,
-            "sensor_light_level": 0,
+            "sensor_occupancy_duration": DEFAULT_SENSOR_OCCUPANCY_DURATION,
+            "sensor_absence_duration": DEFAULT_SENSOR_ABSENCE_DURATION,
+            "sensor_light_level": DEFAULT_SENSOR_LIGHT_LEVEL,
             # Runtime controls (switches only)
-            "switch_automation": True,
-            "switch_auto_on": True,
-            "switch_auto_off": True,
-            "switch_night_mode": False,
-            "switch_night_manual_on": False,
+            "switch_automation": DEFAULT_SWITCH_AUTOMATION,
+            "switch_auto_on": DEFAULT_SWITCH_AUTO_ON,
+            "switch_auto_off": DEFAULT_SWITCH_AUTO_OFF,
+            "switch_night_mode": DEFAULT_SWITCH_NIGHT_MODE,
+            "switch_night_manual_on": DEFAULT_SWITCH_NIGHT_MANUAL_ON,
         }
+
+        # Initialize coordinator
+        hass.async_create_task(self.async_initialize())
 
     async def async_config_entry_first_refresh(self) -> None:
         """Initialize the coordinator."""
@@ -156,24 +183,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     @callback
     def _async_setup_listeners(self) -> None:
-        """Set up state change event listeners for presence and light entities.
-
-        Registers callbacks for:
-        - Presence sensor state changes
-        - Light state changes (both regular and night mode lights)
-        """
+        """Set up state change event listeners."""
         if not self._is_configured:
-            logCoordinator.debug("Skipping listener setup - not configured")
             return
 
-        logCoordinator.debug(
-            "Setting up state change listeners for room: %s", self.room_name
-        )
-
-        # Set up presence sensor listener
-        logCoordinator.debug(
-            "Setting up presence sensor listener for: %s", self.presence_sensor
-        )
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
@@ -182,9 +195,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             )
         )
 
-        # Set up light listeners
         active_lights = self.lights + self.night_lights
-        logCoordinator.debug("Setting up light listeners for: %s", active_lights)
         for light in active_lights:
             self.entry.async_on_unload(
                 async_track_state_change_event(
@@ -196,12 +207,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     @callback
     def _get_active_lights(self) -> list:
-        """Get the currently active set of lights based on night mode state.
-
-        Returns:
-            list: Night mode lights if night mode is active, otherwise regular lights
-        """
-        return self.night_lights if self._is_night_mode() else self.lights
+        """Get the currently active set of lights based on night mode state."""
+        return self.night_lights if self.is_night_mode() else self.lights
 
     @callback
     def is_night_mode(self) -> bool:
@@ -211,18 +218,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             bool: True if night mode is active, False otherwise
         """
         return self._is_night_mode()
-
-    async def handle_state_changed(self, new_state: RoomState) -> None:
-        """Handle state machine state changes and update lights accordingly.
-
-        Args:
-            new_state: The new RoomState to handle
-
-        Triggers:
-            - Light state updates based on occupancy
-            - Data refresh for all entities
-        """
-        await self._handle_state_changed(new_state)
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data."""
@@ -258,11 +253,39 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         return updated_data
 
     async def _handle_state_changed(self, new_state: RoomState) -> None:
-        """Handle state machine state changes."""
+        """Handle room state changes."""
         if new_state == RoomState.OCCUPIED:
-            await self._apply_light_states()
+            active_lights = self.active_lights
+            # If all stored states are off, turn on all lights
+            all_lights_off = all(
+                not self._manual_states.get(light, True) for light in active_lights
+            )
+
+            if all_lights_off:
+                logCoordinator.debug("All lights were off - turning on all lights")
+                for light in active_lights:
+                    try:
+                        domain = light.split(".")[0]
+                        await self.hass.services.async_call(
+                            domain, "turn_on", {"entity_id": light}, blocking=True
+                        )
+                    except ServiceNotFound as err:
+                        logCoordinator.error("Failed to turn on %s: %s", light, err)
+            else:
+                # Restore previous light states
+                logCoordinator.debug("Restoring previous light states")
+                for light in active_lights:
+                    if self._manual_states.get(light, False):
+                        try:
+                            domain = light.split(".")[0]
+                            await self.hass.services.async_call(
+                                domain, "turn_on", {"entity_id": light}, blocking=True
+                            )
+                        except ServiceNotFound as err:
+                            logCoordinator.error("Failed to turn on %s: %s", light, err)
         elif new_state == RoomState.VACANT:
             await self._turn_off_lights()
+
         await self.async_refresh()
 
     async def _async_light_changed(self, event) -> None:
@@ -287,26 +310,30 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def _apply_light_states(self) -> None:
         """Apply stored light states or turn on lights."""
-        if not self._manual_states:
-            # No stored states, turn on all lights
-            for light in self._get_active_lights():
+        active_lights = self._get_active_lights()
+        if not active_lights:
+            return
+
+        for light in active_lights:
+            try:
+                domain = light.split(".")[0]
                 await self.hass.services.async_call(
-                    "light", "turn_on", {"entity_id": light}, blocking=True
+                    domain, "turn_on", {"entity_id": light}, blocking=True
                 )
-        else:
-            # Apply stored states
-            for light, state in self._manual_states.items():
-                service = "turn_on" if state else "turn_off"
-                await self.hass.services.async_call(
-                    "light", service, {"entity_id": light}, blocking=True
-                )
+            except ServiceNotFound as err:
+                logCoordinator.error("Failed to turn on %s: %s", light, err)
 
     async def _turn_off_lights(self) -> None:
         """Turn off all active lights."""
-        for light in self._get_active_lights():
-            await self.hass.services.async_call(
-                "light", "turn_off", {"entity_id": light}, blocking=True
-            )
+        active_lights = self._get_active_lights()
+        for light in active_lights:
+            try:
+                domain = light.split(".")[0]
+                await self.hass.services.async_call(
+                    domain, "turn_off", {"entity_id": light}, blocking=True
+                )
+            except ServiceNotFound as err:
+                logCoordinator.error("Failed to turn off %s: %s", light, err)
 
     async def async_save_options(self) -> None:
         """Save manual states to config entry - called during shutdown."""
@@ -407,3 +434,50 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         )
 
         self._is_configured = bool(self.presence_sensor and self.lights)
+
+    async def handle_state_changed(self, new_state: RoomState) -> None:
+        """Public method to handle state changes."""
+        await self._handle_state_changed(new_state)
+
+    @property
+    def active_lights(self):
+        """Get list of currently active lights based on mode."""
+        if self.is_night_mode():
+            return self.night_lights
+        return self.lights
+
+    async def clear_manual_states(self) -> None:
+        """Clear all manual light states."""
+        self._manual_states.clear()
+        await self._store.async_save()
+
+    async def _async_init_manual_states(self) -> None:
+        """Initialize manual states by polling current light states."""
+        active_lights = self.active_lights
+        for light in active_lights:
+            try:
+                state = self.hass.states.get(light)
+                if state:
+                    self._manual_states[light] = state.state == STATE_ON
+                    logCoordinator.debug(
+                        "Initialized light %s state to %s",
+                        light,
+                        self._manual_states[light],
+                    )
+            except HomeAssistantError as err:
+                logCoordinator.error("Failed to get state for %s: %s", light, err)
+
+        await self._store.async_save()
+
+    async def async_initialize(self) -> None:
+        """Initialize the coordinator."""
+        # Load stored manual states
+        stored_data = await self._store.async_load()
+        if stored_data:
+            self._manual_states = stored_data
+
+        # Initialize states from current light states
+        await self._async_init_manual_states()
+
+        # Set up listeners
+        self._async_setup_listeners()
