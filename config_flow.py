@@ -35,6 +35,10 @@ from .const import (
     DEFAULT_LONG_TIMEOUT,
     DEFAULT_SHORT_TIMEOUT,
     DEFAULT_LIGHT_THRESHOLD,
+    CONF_NIGHT_MODE_START,
+    CONF_NIGHT_MODE_END,
+    DEFAULT_NIGHT_MODE_START,
+    DEFAULT_NIGHT_MODE_END,
 )
 
 
@@ -116,7 +120,6 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
     ) -> FlowResult:
         """Handle options flow."""
         if user_input is not None:
-            # Only update options, core settings from data should stay in data
             options = {
                 CONF_PRESENCE_SENSOR: user_input[CONF_PRESENCE_SENSOR],
                 CONF_LIGHTS: user_input[CONF_LIGHTS],
@@ -126,6 +129,9 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                 CONF_LONG_TIMEOUT: user_input[CONF_LONG_TIMEOUT],
                 CONF_SHORT_TIMEOUT: user_input[CONF_SHORT_TIMEOUT],
                 CONF_LIGHT_THRESHOLD: user_input[CONF_LIGHT_THRESHOLD],
+                # Add these:
+                CONF_NIGHT_MODE_START: user_input[CONF_NIGHT_MODE_START],
+                CONF_NIGHT_MODE_END: user_input[CONF_NIGHT_MODE_END],
             }
 
             # Handle optional light sensor
@@ -136,7 +142,7 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
 
         schema = vol.Schema(
             {
-                # Required entity selectors
+                # Entity Selections - Group 1
                 vol.Required(
                     CONF_PRESENCE_SENSOR,
                     default=self.config_entry.options.get(CONF_PRESENCE_SENSOR),
@@ -152,7 +158,7 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                         multiple=True,
                     )
                 ),
-                # Configurable settings from options
+                # Night Mode Settings - Group 2
                 vol.Optional(
                     CONF_NIGHT_LIGHTS,
                     default=self.config_entry.options.get(CONF_NIGHT_LIGHTS, []),
@@ -162,16 +168,75 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                         multiple=True,
                     )
                 ),
+                vol.Required(
+                    CONF_NIGHT_MODE_START,
+                    default=self.config_entry.options.get(
+                        CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
+                    ),
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_NIGHT_MODE_END,
+                    default=self.config_entry.options.get(
+                        CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
+                    ),
+                ): selector.TimeSelector(),
+                # Timeout Settings - Group 2
+                vol.Required(
+                    CONF_DETECTION_TIMEOUT,
+                    default=self.config_entry.options.get(
+                        CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=30, mode="box", step=1, unit_of_measurement="seconds"
+                    )
+                ),
+                vol.Required(
+                    CONF_LONG_TIMEOUT,
+                    default=self.config_entry.options.get(
+                        CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=3600,
+                        mode="box",
+                        step=30,
+                        unit_of_measurement="seconds",
+                    )
+                ),
+                vol.Required(
+                    CONF_SHORT_TIMEOUT,
+                    default=self.config_entry.options.get(
+                        CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=300,
+                        mode="box",
+                        step=10,
+                        unit_of_measurement="seconds",
+                    )
+                ),
+                # Light Settings - Group 3
                 vol.Optional(
                     CONF_LIGHT_SENSOR,
-                    description={
-                        "suggested_value": self.config_entry.options.get(
-                            CONF_LIGHT_SENSOR
-                        )
-                    },
+                    default=self.config_entry.options.get(CONF_LIGHT_SENSOR),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=SENSOR_DOMAIN, multiple=False)
+                    selector.EntitySelectorConfig(domain=SENSOR_DOMAIN)
                 ),
+                vol.Optional(
+                    CONF_LIGHT_THRESHOLD,
+                    default=self.config_entry.options.get(
+                        CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1000, mode="box", step=10, unit_of_measurement="lux"
+                    )
+                ),
+                # Room Settings - Group 4
                 vol.Optional(
                     CONF_ADJACENT_ROOMS,
                     default=self.config_entry.options.get(CONF_ADJACENT_ROOMS, []),
@@ -182,33 +247,19 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                         mode="dropdown",
                     )
                 ),
+                # Time Settings - Group 2
                 vol.Required(
-                    CONF_DETECTION_TIMEOUT,
+                    CONF_NIGHT_MODE_START,
                     default=self.config_entry.options.get(
-                        CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
+                        CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
                     ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=1, max=30, mode="box", step=1)
-                ),
+                ): selector.TimeSelector(),
                 vol.Required(
-                    CONF_LONG_TIMEOUT,
+                    CONF_NIGHT_MODE_END,
                     default=self.config_entry.options.get(
-                        CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT
+                        CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
-                vol.Required(
-                    CONF_SHORT_TIMEOUT,
-                    default=self.config_entry.options.get(
-                        CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
-                # Optional light threshold
-                vol.Optional(
-                    CONF_LIGHT_THRESHOLD,
-                    default=self.config_entry.options.get(
-                        CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
+                ): selector.TimeSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

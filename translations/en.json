@@ -33,7 +33,9 @@
           "detection_timeout": "Detection Timeout",
           "long_timeout": "Long Timeout",
           "short_timeout": "Short Timeout",
-          "light_threshold": "Light Level Threshold"
+          "light_threshold": "Light Level Threshold",
+          "night_mode_start": "Night Mode Start Time",
+          "night_mode_end": "Night Mode End Time"
         },
         "data_description": {
           "presence_sensor": "Motion or occupancy sensor that detects presence in the room",
@@ -44,7 +46,9 @@
           "detection_timeout": "Seconds to wait after motion stops before starting countdown (1-30)",
           "long_timeout": "Seconds to wait before turning off lights during day (30-3600)",
           "short_timeout": "Seconds to wait before turning off lights during night (10-300)",
-          "light_threshold": "Light level below which lights will be activated (0-1000 lux)"
+          "light_threshold": "Light level below which lights will be activated (0-1000 lux)",
+          "night_mode_start": "Time when night mode should begin",
+          "night_mode_end": "Time when night mode should end"
         }
       }
     }

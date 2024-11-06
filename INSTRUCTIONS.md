@@ -66,30 +66,62 @@ After initial setup, additional features can be configured:
    - Auto-On/Off settings
    - Night Mode settings
 
-### Device Page
+### Device Page (Runtime Controls)
 
-Runtime controls and sensors:
+1. Runtime Controls
 
-1. Switches
+   - Room Automation Switch: Enable/disable room automation
+   - Auto-On Switch: Control automatic turn on behavior
+   - Auto-Off Switch: Control automatic turn off behavior
+   - Night Mode Switch: Enable/disable night mode operation
+   - Night Manual-On Switch: Require manual control during night mode
 
-   - Room Automation
-   - Auto-On
-   - Auto-Off
-   - Night Mode
-   - Night Manual-On
-
-2. Numbers
-
-   - Long timeout
-   - Short timeout
-   - Light threshold
-
-3. Sensors
+2. Status Display
    - Occupancy State (Occupied/Vacant)
-   - Absence Duration (Time since presence lost after detection timeout)
+   - Absence Duration (Time since presence lost)
    - Occupancy Duration (Time since room became occupied)
-   - Light Level (Lux value from light sensor)
-   - Night Mode Status (On/Off)
+   - Light Level (Current lux value if sensor configured)
+   - Night Mode Status (Active/Inactive)
+
+### Options Flow (Configuration)
+
+1. Essential Configuration
+
+   - Room name (required)
+   - Presence sensor selection (required)
+   - Regular lights selection (required)
+
+2. Advanced Configuration
+   - Night mode lights selection
+   - Light sensor selection
+   - Timeout Values:
+     - Long timeout (normal operation)
+     - Short timeout (night mode)
+     - Detection timeout
+   - Light threshold (if sensor configured)
+   - Night mode times (start/end)
+   - Adjacent room selection
+
+### Data Flow Architecture
+
+1. Runtime State Flow
+
+   - Device controls → Storage → Runtime state
+   - Manual overrides → Storage → Light states
+   - Presence events → State machine → Runtime state
+   - No options updates during operation
+
+2. Configuration Flow
+
+   - Options flow → Config entry
+   - Config changes require reload
+   - No runtime state storage in options
+
+3. Storage Usage
+   - Runtime states only
+   - Manual light states
+   - Timer states
+   - No configuration storage
 
 ## Development Guidelines
 
@@ -224,3 +256,97 @@ Runtime controls and sensors:
      - Skip unavailable light
      - Log warning
      - Show error state in UI
+
+## State Management and Data Flow
+
+### Storage Structure
+
+```python
+@dataclass
+class DynamicPresenceStorageData:
+    """Storage data structure."""
+    states: dict  # Runtime entity states
+    manual_states: dict  # Manual light states
+```
+
+### Data Flow Architecture
+
+1. Storage Helper (`storage.Store`)
+
+   - Primary source of truth for runtime states
+   - Located at `.storage/dynamic_presence.{entry_id}`
+   - Handles:
+     - Entity states (numbers, switches, times)
+     - Manual light states
+     - Timer-related states
+   - No integration reload on updates
+
+2. Config Entry
+
+   - Stores static configuration
+   - Room name only
+   - Located in `.storage/core.config_entries`
+
+3. Options Entry
+   - Stores user configuration
+   - Entity selections (sensors, lights)
+   - Initial setup parameters
+   - Must stay in sync with storage helper
+
+### State Synchronization Rules
+
+1. Device Page → Storage → Options
+
+   ```
+   UI Change → Update Storage → Update Runtime State
+            → NO direct Options/Config updates during timers
+   ```
+
+2. Options Page → Config → Storage
+
+   ```
+   Options Change → Update Options Entry
+                 → Update Storage
+                 → Update Runtime State
+   ```
+
+3. Startup Sequence
+
+   ```
+   Load Storage → Update Runtime State
+               → Sync to Options if needed
+               → Restore timers
+   ```
+
+4. Options Flow
+   ```
+   Open Options → Load current states from Storage
+   Save Options → Update Options Entry
+                → Update Storage
+                → Update Runtime State
+   ```
+
+### Implementation Notes
+
+1. Storage Helper is used for:
+
+   - All runtime state changes
+   - Timer state persistence
+   - Manual light state tracking
+   - Any frequently changing values
+
+2. Options Entry is used for:
+
+   - Entity configurations
+   - User preferences
+   - Initial setup parameters
+
+3. Config Entry is used for:
+
+   - Room name
+   - Integration identification
+
+4. State Updates:
+   - Device page updates only use Storage Helper
+   - Options page updates use both Storage and Options Entry
+   - Never update Config/Options during timer operations

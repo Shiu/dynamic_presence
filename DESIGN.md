@@ -26,27 +26,37 @@ Control lights automatically based on presence detection.
 
 ## Controls and Sensors
 
-### Required Entities
+### Runtime Controls (Device Page)
 
-- Binary sensor: Presence Sensor (Occupied/Vacant)
-- Switch: Room Automation (master enable/disable)
-- Switch: Auto-On (turn on when presence detected)
-- Switch: Auto-Off (turn off when vacant)
-- Number: Timeout adjustments
-  - Long timeout
-  - Short timeout
-  - Detection timeout
+1. Required Controls
 
-### Optional Entities
+   - Room Automation Switch (master enable/disable)
+   - Auto-On Switch (presence-based activation)
+   - Auto-Off Switch (vacancy-based deactivation)
+   - Night Mode Switch (alternate light control)
+   - Night Manual-On Switch (night mode behavior)
 
-- Light sensor: Ambient light level (if light sensor configured)
-- Switch: Night Mode (enable/disable night mode)
-- Switch: Night Manual-On (require manual control to turn on during night mode)
-- Number: Timeout adjustments
-  - Light threshold (lux, only if light sensor configured)
-- Time: Night Mode Start (default: 23:00)
-- Time: Night Mode End (default: 08:00)
-- Number: Light threshold (lux, 0 = always on)
+2. Status Display
+   - Occupancy State (current room state)
+   - Duration Sensors (occupancy/absence times)
+   - Light Level (ambient light reading)
+   - Night Mode Status (current mode)
+
+### Configuration Controls (Options Flow)
+
+1. Required Parameters
+
+   - Room name (for identification)
+   - Presence sensor (motion/occupancy)
+   - Regular lights (primary control)
+
+2. Optional Parameters
+   - Night mode lights (alternate set)
+   - Light sensor (ambient light)
+   - Timeout values (state transitions)
+   - Light threshold (automation control)
+   - Night mode times (schedule)
+   - Adjacent rooms (linked control)
 
 ## Basic Functionality Details
 
@@ -254,3 +264,21 @@ Note: Adjacency is one-way and should be configured from the room where presence
   - Start timeout countdown
 
 Note: Specific implementation details and platform configurations will be defined in INSTRUCTIONS.md
+
+## Runtime State (Storage)
+
+- Manual light states
+- Switch states
+- Timer states
+- Current operation mode
+- Restored on HA restart
+- Persisted during updates
+
+## Configuration State (Config Entry)
+
+- Entity selections
+- Timeout values
+- Night mode settings
+- Adjacent room links
+- Requires reload to change
+- No runtime data

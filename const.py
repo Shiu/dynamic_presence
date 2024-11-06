@@ -117,3 +117,5 @@ SENSOR_KEYS = [
     "light_level",
     "night_mode_status",
 ]
+
+STORAGE_VERSION = 1

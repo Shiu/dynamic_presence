@@ -7,9 +7,10 @@ from typing import Dict, Any, TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.event import async_track_point_in_utc_time, async_call_later
 from homeassistant.helpers.template import TemplateError
 from homeassistant.util import dt as dt_util
+
 
 if TYPE_CHECKING:
     from .coordinator import DynamicPresenceCoordinator
@@ -142,52 +143,48 @@ class PresenceControl:
     @callback
     def _start_detection_timer(self) -> None:
         """Start the detection timeout timer."""
-        try:
-            detection_timeout = self.coordinator.data["number_detection_timeout"]
-            expiration_time = dt_util.utcnow() + timedelta(seconds=detection_timeout)
+        if self._detection_timer:
+            self._detection_timer.cancel()
 
-            logPresenceControl.debug(
-                "Starting detection timer for %s seconds (expires: %s)",
-                detection_timeout,
-                expiration_time,
-            )
+        detection_timeout = self.coordinator.detection_timeout
 
-            # Simply replace the timer without explicit cancellation
-            self._detection_timer = async_track_point_in_utc_time(
-                self.hass, self._on_detection_timer_expired, expiration_time
-            )
-        except (HomeAssistantError, TemplateError) as err:
-            logPresenceControl.warning(
-                "Error starting detection timer: %s", err, exc_info=True
-            )
+        self._detection_timer = async_call_later(
+            self.hass, detection_timeout, self._detection_timer_finished
+        )
+        logPresenceControl.debug(
+            "Starting detection timer for %s seconds",
+            detection_timeout,
+        )
+
+    async def _detection_timer_finished(self, _now) -> None:
+        """Handle detection timer completion."""
+        self._detection_timer = None
+        await self.handle_detection_timeout()
 
     @callback
     def _start_countdown_timer(self) -> None:
-        """Start the vacancy countdown timer."""
-        try:
-            timeout = (
-                self.coordinator.data["number_short_timeout"]
-                if self.coordinator.is_night_mode()
-                else self.coordinator.data["number_long_timeout"]
-            )
-            detection_timeout = self.coordinator.data["number_detection_timeout"]
-            adjusted_timeout = timeout - detection_timeout
-            expiration_time = dt_util.utcnow() + timedelta(seconds=adjusted_timeout)
+        """Start the countdown timer."""
+        if self._countdown_timer:
+            self._countdown_timer.cancel()
 
-            logPresenceControl.debug(
-                "Starting countdown timer for %s seconds (expires: %s)",
-                adjusted_timeout,
-                expiration_time,
-            )
+        timeout = (
+            self.coordinator.short_timeout
+            if self.coordinator.is_night_mode()
+            else self.coordinator.long_timeout
+        )
 
-            # Simply replace the timer without explicit cancellation
-            self._countdown_timer = async_track_point_in_utc_time(
-                self.hass, self._on_countdown_timer_expired, expiration_time
-            )
-        except (HomeAssistantError, TemplateError) as err:
-            logPresenceControl.warning(
-                "Error starting countdown timer: %s", err, exc_info=True
-            )
+        self._countdown_timer = async_call_later(
+            self.hass, timeout, self._countdown_timer_finished
+        )
+        logPresenceControl.debug(
+            "Starting countdown timer for %s seconds",
+            timeout,
+        )
+
+    async def _countdown_timer_finished(self, _now) -> None:
+        """Handle countdown timer completion."""
+        self._countdown_timer = None
+        await self.handle_countdown_finished()
 
     @callback
     def _update_countdown_timer(self) -> None:
@@ -365,3 +362,43 @@ class PresenceControl:
                 err,
                 exc_info=True,
             )
+
+    async def start_detection_timer(self) -> None:
+        """Public method to start detection timer."""
+        await self._start_detection_timer()
+
+    async def start_countdown_timer(self) -> None:
+        """Public method to start countdown timer."""
+        await self._start_countdown_timer()
+
+    async def handle_detection_timeout(self) -> None:
+        """Handle detection timeout completion."""
+        if self.state == RoomState.DETECTION_TIMEOUT:
+            logPresenceControl.debug("Detection timeout expired, starting countdown")
+            await self.transition_to(RoomState.COUNTDOWN)
+            self._start_countdown_timer()
+
+    async def handle_countdown_finished(self) -> None:
+        """Handle countdown timer completion."""
+        if self.state == RoomState.COUNTDOWN:
+            logPresenceControl.debug("Countdown finished, room is now vacant")
+            await self.transition_to(RoomState.VACANT)
+            # Here we'll add light control logic later
+
+    async def transition_to(self, new_state: RoomState) -> None:
+        """Handle state transitions."""
+        if new_state == self.state:
+            return
+
+        old_state = self.state
+        self._state = new_state
+
+        logPresenceControl.info(
+            "State transition: %s -> %s (last presence: %s)",
+            old_state.value,
+            new_state.value,
+            self._last_presence_time,
+        )
+
+        # Update coordinator data
+        await self.coordinator.async_refresh()
