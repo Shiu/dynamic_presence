@@ -7,11 +7,8 @@ from typing import Any, Dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.helpers.event import (
-    async_track_state_change_event,
-)
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .presence_control import PresenceControl, RoomState
@@ -21,12 +18,6 @@ from .const import (
     CONF_LIGHTS,
     CONF_NIGHT_LIGHTS,
     CONF_LIGHT_SENSOR,
-    CONF_DETECTION_TIMEOUT,
-    CONF_LONG_TIMEOUT,
-    CONF_SHORT_TIMEOUT,
-    DEFAULT_DETECTION_TIMEOUT,
-    DEFAULT_LONG_TIMEOUT,
-    DEFAULT_SHORT_TIMEOUT,
     DEFAULT_NIGHT_MODE_START,
     DEFAULT_NIGHT_MODE_END,
     CONF_NIGHT_MODE_START,
@@ -70,42 +61,29 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.room_name = entry.title
 
-        # Get values from options without validation
+        # Add device info
+        self.device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": f"Dynamic Presence {self.room_name}",
+            "manufacturer": "Home Assistant",
+            "model": "Dynamic Presence Controller",
+        }
+
+        # Load stored states from config entry data instead of options
+        self._manual_states = entry.data.get("_manual_states", {})
+
+        # Configuration values - still from options as these are user-configurable
         self.presence_sensor = entry.options.get(CONF_PRESENCE_SENSOR)
         self.lights = entry.options.get(CONF_LIGHTS, [])
-
-        # Track configuration state
-        self._is_configured = bool(self.presence_sensor and self.lights)
-
         self.night_lights = entry.options.get(CONF_NIGHT_LIGHTS, [])
         self.light_sensor = entry.options.get(CONF_LIGHT_SENSOR)
+        self._is_configured = bool(self.presence_sensor and self.lights)
 
-        # Initialize state machine
-        self._presence_control = PresenceControl(hass, self._handle_state_changed)
+        # State tracking
+        self._presence_control = PresenceControl(hass, self)
+        self._stored_states = {}
 
-        # State management
-        self._manual_states = {}
-
-        # Timers
-        self._detection_timer = None
-        self._countdown_timer = None
-        self._detection_timeout = entry.options.get(
-            CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
-        )
-        self._long_timeout = entry.options.get(CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT)
-        self._short_timeout = entry.options.get(
-            CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
-        )
-
-        # Device info
-        self.device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"Dynamic Presence {self.room_name}",
-            manufacturer="Home Assistant",
-            model="Dynamic Presence Controller",
-        )
-
-        # Initialize data with saved values from entry.options or defaults
+        # Data initialization - load from entry.data with defaults
         self.data = {
             # Binary sensors
             "binary_sensor_occupancy": False,
@@ -113,21 +91,21 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             "sensor_occupancy_duration": 0,
             "sensor_absence_duration": 0,
             "sensor_light_level": 0,
-            # Numbers - load from entry.options with defaults
+            # Numbers - load from entry.data with defaults
             **{
-                f"number_{key}": entry.options.get(key, config["default"])
+                f"number_{key}": entry.data.get(key, config["default"])
                 for key, config in NUMBER_CONFIG.items()
             },
-            # Switches - load from entry.options with defaults
+            # Switches - load from entry.data with defaults
             **{
-                f"switch_{key}": entry.options.get(key, SWITCH_CONFIG[key])
+                f"switch_{key}": entry.data.get(key, SWITCH_CONFIG[key])
                 for key in SWITCH_KEYS
             },
-            # Time - load from entry.options with defaults
+            # Time - load from entry.data with defaults
             **{
-                f"time_{key}": entry.options.get(key, DEFAULT_NIGHT_MODE_START)
+                f"time_{key}": entry.data.get(key, DEFAULT_NIGHT_MODE_START)
                 if key == CONF_NIGHT_MODE_START
-                else entry.options.get(key, DEFAULT_NIGHT_MODE_END)
+                else entry.data.get(key, DEFAULT_NIGHT_MODE_END)
                 for key in TIME_KEYS
             },
         }
@@ -139,20 +117,36 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     @callback
     def _async_setup_listeners(self) -> None:
-        """Set up state change listeners."""
-        # Skip setting up listeners if not configured
+        """Set up state change event listeners for presence and light entities.
+
+        Registers callbacks for:
+        - Presence sensor state changes
+        - Light state changes (both regular and night mode lights)
+        """
         if not self._is_configured:
+            logCoordinator.debug("Skipping listener setup - not configured")
             return
 
+        logCoordinator.debug(
+            "Setting up state change listeners for room: %s", self.room_name
+        )
+
+        # Set up presence sensor listener
+        logCoordinator.debug(
+            "Setting up presence sensor listener for: %s", self.presence_sensor
+        )
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
                 [self.presence_sensor],
-                self._async_presence_changed,
+                self._presence_control.handle_presence_event,
             )
         )
 
-        for light in self.lights + self.night_lights:
+        # Set up light listeners
+        active_lights = self.lights + self.night_lights
+        logCoordinator.debug("Setting up light listeners for: %s", active_lights)
+        for light in active_lights:
             self.entry.async_on_unload(
                 async_track_state_change_event(
                     self.hass,
@@ -161,43 +155,53 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 )
             )
 
+    @callback
+    def _get_active_lights(self) -> list:
+        """Get the currently active set of lights based on night mode state.
+
+        Returns:
+            list: Night mode lights if night mode is active, otherwise regular lights
+        """
+        return self.night_lights if self._is_night_mode() else self.lights
+
+    @callback
+    def is_night_mode(self) -> bool:
+        """Check if night mode is currently active.
+
+        Returns:
+            bool: True if night mode is active, False otherwise
+        """
+        return self._is_night_mode()
+
+    async def handle_state_changed(self, new_state: RoomState) -> None:
+        """Handle state machine state changes and update lights accordingly.
+
+        Args:
+            new_state: The new RoomState to handle
+
+        Triggers:
+            - Light state updates based on occupancy
+            - Data refresh for all entities
+        """
+        await self._handle_state_changed(new_state)
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data."""
-        updated_data = self.data.copy() if self.data else {}
-        current_time = dt_util.utcnow()
-        last_presence_time = self._presence_control.last_presence_time
-        detection_timeout_end = getattr(
-            self._presence_control, "_detection_timeout_end", None
-        )
+        if not hasattr(self, "_presence_control"):
+            return self.data
 
-        # Update occupancy binary sensor - True for both OCCUPIED and DETECTION_TIMEOUT states
-        updated_data["binary_sensor_occupancy"] = self._presence_control.state in [
+        updated_data = self.data.copy()
+        current_state = self._presence_control.state
+
+        # Update occupancy binary sensor
+        updated_data["binary_sensor_occupancy"] = current_state in [
             RoomState.OCCUPIED,
             RoomState.DETECTION_TIMEOUT,
         ]
 
-        # Handle duration sensors
-        if last_presence_time is None:
-            updated_data["sensor_occupancy_duration"] = 0
-            updated_data["sensor_absence_duration"] = 0
-        elif self._presence_control.state in [
-            RoomState.OCCUPIED,
-            RoomState.DETECTION_TIMEOUT,
-        ]:
-            updated_data["sensor_occupancy_duration"] = int(
-                (current_time - last_presence_time).total_seconds()
-            )
-            updated_data["sensor_absence_duration"] = 0
-        elif self._presence_control.state in [
-            RoomState.COUNTDOWN,
-            RoomState.VACANT,
-        ]:
-            updated_data["sensor_occupancy_duration"] = 0
-            if detection_timeout_end:
-                # Start counting from when detection timeout ended
-                updated_data["sensor_absence_duration"] = self._detection_timeout + int(
-                    (current_time - detection_timeout_end).total_seconds()
-                )
+        # Get duration data from presence control
+        durations = self._presence_control.durations
+        updated_data.update(durations)
 
         return updated_data
 
@@ -209,86 +213,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             await self._turn_off_lights()
         await self.async_refresh()
 
-    async def _async_presence_changed(self, event) -> None:
-        """Handle presence sensor state changes."""
-        new_state = event.data.get("new_state")
-        if new_state is None:
-            return
-
-        logCoordinator.debug(
-            "Presence sensor changed to: %s (current state: %s)",
-            new_state.state,
-            self._presence_control.state.value,
-        )
-
-        if new_state.state == STATE_ON:
-            await self._on_presence_sensor_activated()
-        else:
-            await self._on_presence_sensor_deactivated()
-
-    async def _on_presence_sensor_activated(self) -> None:
-        """Handle presence sensor turning ON."""
-        await self._presence_control.handle_presence_detected()
-        self._cancel_timers()
-        await self.async_refresh()
-
-    async def _on_presence_sensor_deactivated(self) -> None:
-        """Handle presence sensor turning OFF."""
-        await self._presence_control.handle_presence_lost()
-        self._start_detection_timer()
-        await self.async_refresh()
-
-    def _cancel_timers(self) -> None:
-        """Cancel all active timers."""
-        if self._detection_timer:
-            logCoordinator.debug("Cancelling detection timer")
-            self._detection_timer.cancel()
-            self._detection_timer = None
-        if self._countdown_timer:
-            logCoordinator.debug("Cancelling countdown timer")
-            self._countdown_timer.cancel()
-            self._countdown_timer = None
-
-    def _start_detection_timer(self) -> None:
-        """Start the detection timeout timer."""
-        logCoordinator.debug(
-            "Starting detection timer for %s seconds", self._detection_timeout
-        )
-        self._cancel_timers()
-        self._detection_timer = self.hass.loop.call_later(
-            self._detection_timeout,
-            lambda: self.hass.async_create_task(self._on_detection_timer_expired()),
-        )
-
-    def _start_countdown_timer(self) -> None:
-        """Start the vacancy countdown timer."""
-        self._cancel_timers()
-        timeout = self._short_timeout if self._is_night_mode() else self._long_timeout
-        # Subtract detection timeout since we've already waited that long
-        adjusted_timeout = timeout - self._detection_timeout
-        logCoordinator.debug(
-            "Starting countdown timer for %s seconds", adjusted_timeout
-        )
-        self._countdown_timer = self.hass.loop.call_later(
-            adjusted_timeout,
-            lambda: self.hass.async_create_task(self._on_countdown_timer_expired()),
-        )
-
-    async def _on_detection_timer_expired(self) -> None:
-        """Handle detection timer expiration."""
-        logCoordinator.debug("Detection timer expired")
-        self._detection_timer = None
-        await self._presence_control.transition_to_countdown()
-        self._start_countdown_timer()
-        await self.async_refresh()
-
-    async def _on_countdown_timer_expired(self) -> None:
-        """Handle countdown timer expiration."""
-        logCoordinator.debug("Countdown timer expired")
-        self._countdown_timer = None
-        await self._presence_control.transition_to_vacant()
-        await self.async_refresh()
-
     async def _async_light_changed(self, event) -> None:
         """Handle light state changes."""
         if self._presence_control.state == RoomState.OCCUPIED:
@@ -296,6 +220,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             new_state = event.data.get("new_state")
             if new_state is not None:
                 self._manual_states[entity_id] = new_state.state == STATE_ON
+                # Store states immediately in entry data
+                new_data = dict(self.entry.data) if self.entry.data else {}
+                new_data["_manual_states"] = self._manual_states
+                self.hass.config_entries.async_update_entry(self.entry, data=new_data)
                 await self.async_refresh()
 
     async def _apply_light_states(self) -> None:
@@ -321,25 +249,26 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 "light", "turn_off", {"entity_id": light}, blocking=True
             )
 
-    def _get_active_lights(self) -> list:
-        """Get the currently active light set based on night mode."""
-        return self.night_lights if self._is_night_mode() else self.lights
-
-    def _is_night_mode(self) -> bool:
-        """Check if night mode is active."""
-        # This will be implemented when night mode configuration is added
-        return False
-
     async def async_entity_changed(
         self, entity_type: str, key: str, value: Any
     ) -> None:
         """Handle entity state changes."""
+        # Update runtime data only
         self.data[f"{entity_type}_{key}"] = value
-        # Store in config entry options
-        new_options = dict(self.entry.options)
-        new_options[key] = value
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
         self.async_set_updated_data(self.data)
+
+        # Store in memory
+        if not hasattr(self, "_stored_states"):
+            self._stored_states = {}
+        self._stored_states[key] = value
+
+    async def async_save_options(self) -> None:
+        """Save options to config entry - called during shutdown."""
+        if hasattr(self, "_stored_states") and self._stored_states:
+            new_data = dict(self.entry.data) if self.entry.data else {}
+            new_data.update(self._stored_states)
+
+            self.hass.config_entries.async_update_entry(self.entry, data=new_data)
 
     async def async_switch_changed(self, key: str, value: bool) -> None:
         """Handle switch changes."""
@@ -348,7 +277,24 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def async_number_changed(self, key: str, value: float) -> None:
         """Handle number changes."""
         await self.async_entity_changed("number", key, value)
+        await self._presence_control.update_timers("number", key)
 
     async def async_time_changed(self, key: str, value: str) -> None:
         """Handle time changes."""
         await self.async_entity_changed("time", key, value)
+
+    def _is_night_mode(self) -> bool:
+        """Check if night mode is active."""
+        if not self.data["switch_night_mode"]:
+            return False
+
+        current_time = dt_util.now().time()
+        start_time = dt_util.parse_time(self.data["time_night_mode_start"])
+        end_time = dt_util.parse_time(self.data["time_night_mode_end"])
+
+        # Handle overnight periods (when end time is less than start time)
+        if end_time < start_time:
+            return current_time >= start_time or current_time <= end_time
+
+        # Normal period within same day
+        return start_time <= current_time <= end_time
