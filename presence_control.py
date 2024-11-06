@@ -1,13 +1,12 @@
 """State machine for Dynamic Presence integration."""
 
-from datetime import timedelta
 from enum import Enum
 import logging
 from typing import Dict, Any, TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-from homeassistant.helpers.event import async_track_point_in_utc_time, async_call_later
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.template import TemplateError
 from homeassistant.util import dt as dt_util
 
@@ -40,7 +39,8 @@ class PresenceControl:
         self.coordinator = coordinator
         self._state = RoomState.VACANT
         self._last_presence_time = None
-        self._detection_timeout_end = None
+        self._occupancy_start_time = None
+        self._last_logged_state = None
         self._detection_timer = None
         self._countdown_timer = None
         logPresenceControl.debug(
@@ -63,19 +63,35 @@ class PresenceControl:
             "sensor_absence_duration": 0,
         }
 
-        if self._last_presence_time is None:
-            return durations
-
-        if self._state in [RoomState.OCCUPIED, RoomState.DETECTION_TIMEOUT]:
+        # Calculate occupancy duration from start time
+        if self._occupancy_start_time and self.state in [
+            RoomState.OCCUPIED,
+            RoomState.DETECTION_TIMEOUT,
+        ]:
             durations["sensor_occupancy_duration"] = int(
+                (current_time - self._occupancy_start_time).total_seconds()
+            )
+
+        # Calculate absence duration from last presence
+        if self._last_presence_time and self.state in [
+            RoomState.COUNTDOWN,
+            RoomState.VACANT,
+        ]:
+            durations["sensor_absence_duration"] = int(
                 (current_time - self._last_presence_time).total_seconds()
             )
-        elif self._state in [RoomState.COUNTDOWN, RoomState.VACANT]:
-            if self._detection_timeout_end:
-                detection_timeout = self.coordinator.data["number_detection_timeout"]
-                durations["sensor_absence_duration"] = detection_timeout + int(
-                    (current_time - self._detection_timeout_end).total_seconds()
-                )
+
+        # Only log on significant changes (every 30 seconds) or state transitions
+        if (
+            durations["sensor_occupancy_duration"] % 30 == 0
+        ) or self._last_logged_state != self.state:
+            logPresenceControl.debug(
+                "Duration update - State: %s, Occupancy: %d, Absence: %d",
+                self.state.value,
+                durations["sensor_occupancy_duration"],
+                durations["sensor_absence_duration"],
+            )
+            self._last_logged_state = self.state
 
         return durations
 
@@ -186,57 +202,6 @@ class PresenceControl:
         self._countdown_timer = None
         await self.handle_countdown_finished()
 
-    @callback
-    def _update_countdown_timer(self) -> None:
-        """Update countdown timer with new timeout value."""
-        if self._countdown_timer is None:
-            return
-
-        try:
-            # Calculate new timeout
-            timeout = (
-                self.coordinator.data["number_short_timeout"]
-                if self.coordinator.is_night_mode()
-                else self.coordinator.data["number_long_timeout"]
-            )
-            detection_timeout = self.coordinator.data["number_detection_timeout"]
-            adjusted_timeout = timeout - detection_timeout
-
-            # Calculate new expiration based on current time
-            expiration_time = dt_util.utcnow() + timedelta(seconds=adjusted_timeout)
-
-            logPresenceControl.debug(
-                "Updating countdown timer for %s seconds (expires: %s)",
-                adjusted_timeout,
-                expiration_time,
-            )
-
-            self._cancel_countdown_timer()
-            self._countdown_timer = async_track_point_in_utc_time(
-                self.hass, self._on_countdown_timer_expired, expiration_time
-            )
-        except (HomeAssistantError, TemplateError) as err:
-            logPresenceControl.warning(
-                "Error updating countdown timer: %s", err, exc_info=True
-            )
-
-    async def _on_detection_timer_expired(self, _now) -> None:
-        """Handle detection timer expiration."""
-        if self._state != RoomState.DETECTION_TIMEOUT:
-            return  # Ignore if not in correct state
-        logPresenceControl.debug("Detection timer expired at %s", dt_util.utcnow())
-        self._detection_timer = None
-        await self.transition_to_countdown()
-        self._start_countdown_timer()
-
-    async def _on_countdown_timer_expired(self, _now) -> None:
-        """Handle countdown timer expiration."""
-        if self._state != RoomState.COUNTDOWN:
-            return  # Ignore if not in correct state
-        logPresenceControl.debug("Countdown timer expired at %s", dt_util.utcnow())
-        self._countdown_timer = None
-        await self.transition_to_vacant()
-
     async def _on_presence_sensor_activated(self) -> None:
         """Handle presence sensor turning ON."""
         self._cancel_timers()  # Cancel all timers when presence detected
@@ -247,23 +212,20 @@ class PresenceControl:
         await self.handle_presence_lost()
 
     async def handle_presence_detected(self) -> None:
-        """Handle presence detection from any state.
-
-        State Transition: ANY_STATE → OCCUPIED
-        - Updates presence time (except in DETECTION_TIMEOUT)
-        - Transitions to OCCUPIED state
-        - Updates coordinator
-        """
+        """Handle presence detection from any state."""
         try:
-            # Update presence time unless in DETECTION_TIMEOUT
             if self._state != RoomState.DETECTION_TIMEOUT:
                 self._last_presence_time = dt_util.utcnow()
+                self._occupancy_start_time = (
+                    self._last_presence_time
+                )  # Set occupancy start
                 logPresenceControl.debug(
                     "Updated presence time to %s", self._last_presence_time
                 )
 
-            # Transition to OCCUPIED state
-            await self._set_state(RoomState.OCCUPIED)
+            # Cancel any running timers
+            self._cancel_timers()
+            await self.transition_to(RoomState.OCCUPIED)
 
         except (HomeAssistantError, ServiceNotFound) as err:
             logPresenceControl.warning(
@@ -272,60 +234,16 @@ class PresenceControl:
             raise
 
     async def handle_presence_lost(self) -> None:
-        """Handle loss of presence."""
+        """Handle loss of presence from OCCUPIED state."""
         if self._state == RoomState.OCCUPIED:
-            await self._set_state(RoomState.DETECTION_TIMEOUT)
-            self._start_detection_timer()  # Start timer after state change
+            self._last_presence_time = dt_util.utcnow()
+            await self.transition_to(RoomState.DETECTION_TIMEOUT)
+            self._start_detection_timer()
         else:
             logPresenceControl.warning(
                 "Invalid state transition: Cannot handle presence lost from %s state",
                 self._state.value,
             )
-
-    async def transition_to_countdown(self) -> None:
-        """Transition to countdown state."""
-        if self._state == RoomState.DETECTION_TIMEOUT:
-            self._detection_timeout_end = dt_util.utcnow()
-            await self._set_state(RoomState.COUNTDOWN)
-        else:
-            logPresenceControl.warning(
-                "Invalid state transition: Cannot transition to COUNTDOWN from %s state",
-                self._state.value,
-            )
-
-    async def transition_to_vacant(self) -> None:
-        """Transition to vacant state."""
-        if self._state == RoomState.COUNTDOWN:
-            await self._set_state(RoomState.VACANT)
-        else:
-            logPresenceControl.warning(
-                "Invalid state transition: Cannot transition to VACANT from %s state",
-                self._state.value,
-            )
-
-    async def _set_state(self, new_state: RoomState) -> None:
-        """Set new state and notify coordinator."""
-        try:
-            if new_state != self._state:
-                old_state = self._state
-                self._state = new_state
-                logPresenceControl.info(
-                    "State transition: %s -> %s (last presence: %s)",
-                    old_state.value,
-                    new_state.value,
-                    self._last_presence_time,
-                )
-                await self.coordinator.handle_state_changed(new_state)
-        except (HomeAssistantError, ServiceNotFound) as err:
-            logPresenceControl.warning(
-                "Error during state transition to %s: %s",
-                new_state.value,
-                err,
-                exc_info=True,
-            )
-            # Restore previous state on error
-            self._state = old_state
-            raise
 
     async def update_timers(self, control_type: str, key: str) -> None:
         """Update running timers when control values change.
@@ -386,8 +304,24 @@ class PresenceControl:
             # Here we'll add light control logic later
 
     async def transition_to(self, new_state: RoomState) -> None:
-        """Handle state transitions."""
+        """Handle state transitions with validation."""
         if new_state == self.state:
+            return
+
+        # Validate state transition
+        valid_transitions = {
+            RoomState.VACANT: [RoomState.OCCUPIED],
+            RoomState.OCCUPIED: [RoomState.DETECTION_TIMEOUT],
+            RoomState.DETECTION_TIMEOUT: [RoomState.OCCUPIED, RoomState.COUNTDOWN],
+            RoomState.COUNTDOWN: [RoomState.OCCUPIED, RoomState.VACANT],
+        }
+
+        if new_state not in valid_transitions[self.state]:
+            logPresenceControl.warning(
+                "Invalid state transition attempted: %s -> %s",
+                self.state.value,
+                new_state.value,
+            )
             return
 
         old_state = self.state
