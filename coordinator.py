@@ -111,7 +111,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self._is_configured = bool(self.presence_sensor and self.lights)
 
         # State tracking
-        self._presence_control = PresenceControl(hass, self)
+        self._presence_control = PresenceControl(self)
         self._manual_states = {}
 
         # Device info
@@ -237,7 +237,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         durations = self._presence_control.durations
         updated_data.update(durations)
 
-        # Update light level if sensor configured
+        # Update light level only if sensor is configured
         if self.light_sensor:
             try:
                 state = self.hass.states.get(self.light_sensor)
@@ -440,11 +440,12 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         await self._handle_state_changed(new_state)
 
     @property
-    def active_lights(self):
-        """Get list of currently active lights based on mode."""
-        if self.is_night_mode():
-            return self.night_lights
-        return self.lights
+    def active_lights(self) -> list[str]:
+        """Get the currently active light entities based on night mode."""
+        night_lights = self.entry.options.get(CONF_NIGHT_LIGHTS, [])
+        if self._presence_control.is_night_mode_active() and night_lights:
+            return night_lights
+        return self.entry.options[CONF_LIGHTS]
 
     async def clear_manual_states(self) -> None:
         """Clear all manual light states."""
@@ -473,11 +474,56 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         # Load stored manual states
         stored_data = await self._store.async_load()
-        if stored_data:
-            self._manual_states = stored_data
+        self._manual_states = stored_data if stored_data else {}
 
-        # Initialize states from current light states
-        await self._async_init_manual_states()
+        if not stored_data:  # Only initialize all lights to ON for new rooms
+            for light in self.active_lights:
+                self._manual_states[light] = True
+                logCoordinator.debug(
+                    "New room: Initializing light %s manual state to ON", light
+                )
+        else:
+            # For existing rooms, only initialize new lights
+            for light in self.active_lights:
+                if light not in self._manual_states:
+                    self._manual_states[light] = True
+                    logCoordinator.debug(
+                        "Initializing new light %s manual state to ON", light
+                    )
+
+        # Clean up any removed lights
+        removed_lights = set(self._manual_states) - set(self.active_lights)
+        for light in removed_lights:
+            self._manual_states.pop(light)
+            logCoordinator.debug("Removing manual state for deleted light %s", light)
+
+        await self._store.async_save()
 
         # Set up listeners
         self._async_setup_listeners()
+
+        # Initialize presence state based on current sensor state
+        presence_entity = self.entry.options.get(CONF_PRESENCE_SENSOR)
+        if presence_entity:
+            presence_state = self.hass.states.get(presence_entity)
+            if presence_state:
+                logCoordinator.debug(
+                    "Initializing presence state from sensor: %s", presence_state.state
+                )
+                if presence_state.state == "on":
+                    await self._presence_control.handle_presence_detected()
+                else:
+                    await self._presence_control.handle_presence_lost()
+
+    def get_switch(self, switch_id: str) -> bool:
+        """Get switch state."""
+        switch_entity = self.entry.options.get(switch_id)
+        if not switch_entity:
+            return False
+        state = self.hass.states.get(switch_entity)
+        return state is not None and state.state == "on"
+
+    @property
+    def manual_states(self) -> dict:
+        """Get the current manual states of lights."""
+        return dict(self._manual_states)

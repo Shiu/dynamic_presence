@@ -152,14 +152,14 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                 CONF_LONG_TIMEOUT: user_input[CONF_LONG_TIMEOUT],
                 CONF_SHORT_TIMEOUT: user_input[CONF_SHORT_TIMEOUT],
                 CONF_LIGHT_THRESHOLD: user_input[CONF_LIGHT_THRESHOLD],
-                # Add these:
                 CONF_NIGHT_MODE_START: user_input[CONF_NIGHT_MODE_START],
                 CONF_NIGHT_MODE_END: user_input[CONF_NIGHT_MODE_END],
             }
 
-            # Handle optional light sensor
-            if CONF_LIGHT_SENSOR in user_input:
-                options[CONF_LIGHT_SENSOR] = user_input[CONF_LIGHT_SENSOR]
+            # Only add light sensor if it's actually selected and not None/empty
+            light_sensor = user_input.get(CONF_LIGHT_SENSOR)
+            if light_sensor:  # This will handle None, empty string, or empty list
+                options[CONF_LIGHT_SENSOR] = light_sensor
 
             return self.async_create_entry(title="", data=options)
 
@@ -252,7 +252,11 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                 # Light Settings - Group 3
                 vol.Optional(
                     CONF_LIGHT_SENSOR,
-                    default=self.config_entry.options.get(CONF_LIGHT_SENSOR),
+                    description={
+                        "suggested_value": self.config_entry.options.get(
+                            CONF_LIGHT_SENSOR
+                        )
+                    },
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=SENSOR_DOMAIN)
                 ),

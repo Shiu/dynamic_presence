@@ -42,6 +42,7 @@ async def async_setup_entry(
             unique_id=f"{entry.entry_id}_absence_duration",
             key="absence_duration",
         ),
+        ManualStatesSensor(coordinator),
     ]
 
     if coordinator.light_sensor:
@@ -93,3 +94,30 @@ class DynamicPresenceSensor(
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get(f"sensor_{self._key}", 0)
+
+
+class ManualStatesSensor(DynamicPresenceSensor):
+    """Sensor showing manual states of all configured lights."""
+
+    def __init__(self, coordinator: DynamicPresenceCoordinator) -> None:
+        """Initialize the manual states sensor."""
+        super().__init__(
+            coordinator=coordinator,
+            device_class=None,  # Text sensor has no device class
+            state_class=None,  # Text sensor has no state class
+            unique_id=f"{coordinator.entry.entry_id}_manual_states",
+            key="manual_states",
+            native_unit_of_measurement=None,
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return formatted string of manual states."""
+        states = self.coordinator.manual_states
+        if not states:
+            return "No manual states"
+
+        state_strings = []
+        for light, is_on in states.items():
+            state_strings.append(f"{light.split('.')[-1]}: {'ON' if is_on else 'OFF'}")
+        return ", ".join(state_strings)
