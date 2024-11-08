@@ -3,7 +3,7 @@
 from enum import Enum
 import logging
 from typing import Dict, Any, TYPE_CHECKING
-
+from datetime import datetime as dt
 
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
@@ -11,7 +11,11 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.const import STATE_ON
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_NIGHT_MODE
+from .const import (
+    CONF_NIGHT_MODE_SWITCH,
+    CONF_NIGHT_TIME_START,
+    CONF_NIGHT_TIME_END,
+)
 
 if TYPE_CHECKING:
     from .coordinator import DynamicPresenceCoordinator
@@ -45,6 +49,10 @@ class PresenceControl:
         self._last_logged_state = None
         self._detection_timer = None
         self._countdown_timer = None
+        self._night_mode_switch = coordinator.entry.options.get(CONF_NIGHT_MODE_SWITCH)
+        self._night_mode_state = False
+        self._night_time_start = coordinator.entry.options.get(CONF_NIGHT_TIME_START)
+        self._night_time_end = coordinator.entry.options.get(CONF_NIGHT_TIME_END)
 
     @property
     @callback
@@ -341,6 +349,34 @@ class PresenceControl:
             await self._update_state(RoomState.COUNTDOWN)
             self._start_countdown_timer()
 
+    @property
+    def night_mode_switch_state(self) -> bool:
+        """Get the current state of the night mode switch."""
+        if not self._night_mode_switch:
+            return False
+        state = self.hass.states.get(self._night_mode_switch)
+        return state is not None and state.state == "on"
+
+    def is_night_time(self) -> bool:
+        """Check if current time is within night time hours."""
+        if not self._night_time_start or not self._night_time_end:
+            return True  # If no time constraints, always allow night mode
+
+        now = dt.now(self.hass.config.time_zone)
+        current_time = now.time()
+        start_time = dt.strptime(self._night_time_start, "%H:%M").time()
+        end_time = dt.strptime(self._night_time_end, "%H:%M").time()
+
+        if start_time <= end_time:
+            return start_time <= current_time <= end_time
+        else:  # Handles overnight periods (e.g., 22:00 - 06:00)
+            return current_time >= start_time or current_time <= end_time
+
     def is_night_mode_active(self) -> bool:
-        """Check if night mode is active."""
-        return self.coordinator.get_switch(CONF_NIGHT_MODE)
+        """Return True if night mode is active."""
+        logPresenceControl.debug(
+            "Checking night mode - switch: %s, time: %s",
+            self.night_mode_switch_state,
+            self.is_night_time(),
+        )
+        return bool(self.night_mode_switch_state and self.is_night_time())

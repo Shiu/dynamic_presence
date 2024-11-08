@@ -73,7 +73,7 @@ After initial setup, additional features can be configured:
    - Room Automation Switch: Enable/disable room automation
    - Auto-On Switch: Control automatic turn on behavior
    - Auto-Off Switch: Control automatic turn off behavior
-   - Night Mode Switch: Enable/disable night mode operation
+   - Night Mode Switch: Enable/disable night mode functionality
    - Night Manual-On Switch: Require manual control during night mode
 
 2. Status Display
@@ -81,7 +81,7 @@ After initial setup, additional features can be configured:
    - Absence Duration (Time since presence lost)
    - Occupancy Duration (Time since room became occupied)
    - Light Level (Current lux value if sensor configured)
-   - Night Mode Status (Active/Inactive)
+   - Night Mode Status (Shows if night mode is currently active based on switch state and time window)
 
 ### Options Flow (Configuration)
 
@@ -107,7 +107,7 @@ After initial setup, additional features can be configured:
 1. Runtime State Flow
 
    - Device controls → Storage → Runtime state
-   - Manual overrides → Storage → Light states
+   - Manual light states → Storage → Light states
    - Presence events → State machine → Runtime state
    - No options updates during operation
 
@@ -179,7 +179,7 @@ After initial setup, additional features can be configured:
      - Automation: Enable/disable room automation
      - Auto-On: Control automatic turn on
      - Auto-Off: Control automatic turn off
-     - Night Mode: Enable/disable night mode
+     - Night Mode: Enable/disable night mode functionality
      - Night Manual-On: Require manual control during night
 
    - Number Platform
@@ -190,11 +190,17 @@ After initial setup, additional features can be configured:
 
    - Sensor Platform
 
-     - Occupancy: Room occupancy state
-     - Absence Duration: Time since presence lost
-     - Occupancy Duration: Time room occupied
-     - Light Level: Current light level
-     - Night Mode Status: Night mode state
+     - State Sensors:
+       - Occupancy: Current room occupancy state
+       - Night Mode Status: Shows if night mode is currently active
+     - Duration Sensors:
+       - Occupancy Duration: Time since room became occupied
+       - Absence Duration: Time since room became vacant
+     - Manual State Sensors:
+       - Main Manual States: Lists all main lights and their manual states (ON/OFF)
+       - Night Manual States: Lists all night lights and their manual states (ON/OFF)
+     - Environmental Sensors:
+       - Light Level: Current ambient light level (requires light sensor)
 
    - Time Platform
      - Night Mode Start: When night mode begins

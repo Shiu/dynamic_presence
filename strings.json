@@ -61,6 +61,9 @@
           "on": "Occupied",
           "off": "Vacant"
         }
+      },
+      "night_mode": {
+        "name": "Night Mode Active"
       }
     },
     "number": {
@@ -86,6 +89,22 @@
       },
       "light_level": {
         "name": "Light Level"
+      },
+      "main_manual_states": {
+        "name": "Main Manual States",
+        "state_attributes": {
+          "lights": {
+            "name": "Light States"
+          }
+        }
+      },
+      "night_manual_states": {
+        "name": "Night Manual States",
+        "state_attributes": {
+          "lights": {
+            "name": "Light States"
+          }
+        }
       }
     },
     "switch": {

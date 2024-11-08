@@ -8,7 +8,7 @@ Control lights automatically based on presence detection.
 
 1. Turn on lights when presence detected
 2. Turn off lights when room is vacant (after timeout)
-3. Allow manual override of automatic control
+3. Allow manual control of lights with state memory
 4. Maintain state during Home Assistant restarts
 5. Handle connection/sensor failures gracefully
 
@@ -37,10 +37,17 @@ Control lights automatically based on presence detection.
    - Night Manual-On Switch (night mode behavior)
 
 2. Status Display
-   - Occupancy State (current room state)
-   - Duration Sensors (occupancy/absence times)
-   - Light Level (ambient light reading)
-   - Night Mode Status (current mode)
+   - State Sensors:
+     - Occupancy: Current room occupancy state
+     - Night Mode Status: Shows if night mode is currently active
+   - Duration Sensors:
+     - Occupancy Duration: Time since room became occupied
+     - Absence Duration: Time since room became vacant
+   - Manual State Sensors:
+     - Main Manual States: Lists all main lights and their manual states (ON/OFF)
+     - Night Manual States: Lists all night lights and their manual states (ON/OFF)
+   - Environmental Sensors:
+     - Light Level: Current ambient light level (requires light sensor)
 
 ### Configuration Controls (Options Flow)
 
@@ -92,26 +99,67 @@ Control lights automatically based on presence detection.
 
 ### Manual State Storage
 
-- Stores the intended state (on/off) for each light
-- States are only updated when room has presence
-- States are preserved when room becomes vacant
+- Maintains separate manual states for main lights and night lights
+- Each light has its own manual state (ON/OFF) that is stored independently
+- Manual states determine which lights should turn on when presence is detected
+- Manual states are preserved when room becomes vacant
+- Switching between modes preserves manual states for each mode independently
 
-### State Updates
+### Manual State Updates
+
+1. Automatic Updates (When Presence Detected):
+
+   - If all lights in the active mode are off:
+     - Set manual state to ON for all lights in that mode
+   - If all lights in the active mode are on:
+     - Set manual state to ON for all lights in that mode
+   - If lights have mixed states (some on, some off):
+     - Set manual states to match current light states
+
+2. Manual Updates (During Presence):
+   - When a light is manually turned ON:
+     - Light turns on
+     - Its manual state is set to ON
+   - When a light is manually turned OFF:
+     - Light turns off
+     - Its manual state is set to OFF
+   - Only manual states for the active mode's lights are updated
+
+### Mode Behavior
 
 1. When Presence Detected:
 
-   - If all lights are off or all lights are on:
-     - Clear all stored states
-     - Turn on all lights
-   - If lights have mixed states (some on, some off):
-     - Store current state of all lights
-     - Apply these states to lights
+   - Only lights with manual state ON will turn on
+   - Lights with manual state OFF remain off
+   - Active mode (Main/Night) determines which set of lights and manual states are used
 
-2. During Presence:
-   - Update stored states when lights are manually controlled
-   - Example:
-     - Light turned off manually → store state as off
-     - Light turned on manually → store state as on
+2. When Switching to Night Mode:
+
+   - Main lights turn off
+   - Night lights turn on/off according to their stored manual states
+   - Main light manual states remain unchanged
+
+3. When Switching to Main Mode:
+
+   - Night lights turn off
+   - Main lights turn on/off according to their stored manual states
+   - Night light manual states remain unchanged
+
+4. When Room Becomes Vacant (after countdown):
+   - All active mode's lights turn off
+   - Manual states remain unchanged
+
+### Vacancy Behavior
+
+1. Manual Control During Vacancy:
+   - Turning any light on starts the countdown timer
+   - Manual states update according to light operations
+   - If countdown completes:
+     - Lights turn off
+     - Manual states remain unchanged
+   - If presence detected before countdown completes:
+     - Lights remain in their current state
+     - Manual states reflect current light states
 
 ### Vacancy Behavior
 
@@ -267,7 +315,7 @@ Note: Specific implementation details and platform configurations will be define
 
 ## Runtime State (Storage)
 
-- Manual light states
+- Manual light states (ON/OFF for each light)
 - Switch states
 - Timer states
 - Current operation mode

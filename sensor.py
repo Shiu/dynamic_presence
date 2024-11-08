@@ -13,7 +13,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+)
 from .coordinator import DynamicPresenceCoordinator
 
 
@@ -42,7 +44,14 @@ async def async_setup_entry(
             unique_id=f"{entry.entry_id}_absence_duration",
             key="absence_duration",
         ),
-        ManualStatesSensor(coordinator),
+        ManualStatesSensor(
+            coordinator=coordinator,
+            is_night_mode=False,
+        ),
+        ManualStatesSensor(
+            coordinator=coordinator,
+            is_night_mode=True,
+        ),
     ]
 
     if coordinator.light_sensor:
@@ -96,28 +105,50 @@ class DynamicPresenceSensor(
         return self.coordinator.data.get(f"sensor_{self._key}", 0)
 
 
-class ManualStatesSensor(DynamicPresenceSensor):
-    """Sensor showing manual states of all configured lights."""
+class ManualStatesSensor(CoordinatorEntity[DynamicPresenceCoordinator], SensorEntity):
+    """Sensor for tracking manual states."""
 
-    def __init__(self, coordinator: DynamicPresenceCoordinator) -> None:
-        """Initialize the manual states sensor."""
-        super().__init__(
-            coordinator=coordinator,
-            device_class=None,  # Text sensor has no device class
-            state_class=None,  # Text sensor has no state class
-            unique_id=f"{coordinator.entry.entry_id}_manual_states",
-            key="manual_states",
-            native_unit_of_measurement=None,
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        coordinator: DynamicPresenceCoordinator,
+        is_night_mode: bool = False,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._is_night_mode = is_night_mode
+
+        # Set unique_id and entity_id
+        self._attr_unique_id = (
+            f"{coordinator.entry.entry_id}_"
+            f"{'night' if is_night_mode else 'main'}_manual_states"
         )
+        self.entity_id = (
+            f"sensor.{coordinator.room_name}_"
+            f"{'night' if is_night_mode else 'main'}_manual_states"
+        ).lower()
+
+        # Set name based on mode
+        self._attr_translation_key = (
+            "night_manual_states" if is_night_mode else "main_manual_states"
+        )
+        self._attr_device_info = coordinator.device_info
 
     @property
     def native_value(self) -> str:
-        """Return formatted string of manual states."""
+        """Return the state of the sensor."""
         states = self.coordinator.manual_states
-        if not states:
-            return "No manual states"
+        mode_states = states["night" if self._is_night_mode else "main"]
 
-        state_strings = []
-        for light, is_on in states.items():
-            state_strings.append(f"{light.split('.')[-1]}: {'ON' if is_on else 'OFF'}")
-        return ", ".join(state_strings)
+        # Format each light state as "Light Name: ON/OFF"
+        formatted_states = []
+        for entity_id, is_on in mode_states.items():
+            # Extract light name from entity_id (e.g., "light.kitchen" -> "Kitchen")
+            light_name = entity_id.split(".")[-1].replace("_", " ").title()
+            state_str = "ON" if is_on else "OFF"
+            formatted_states.append(f"{light_name}: {state_str}")
+
+        # Join all states with commas
+        return ", ".join(formatted_states) if formatted_states else "No lights"

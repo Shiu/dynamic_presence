@@ -6,10 +6,17 @@ DOMAIN: Final = "dynamic_presence"
 
 # Configuration keys
 CONF_ROOM_NAME = "room_name"
-CONF_PRESENCE_SENSOR = "presence_sensor"
-CONF_LIGHT_SENSOR = "light_sensor"
 CONF_LIGHTS = "lights"
 CONF_NIGHT_LIGHTS = "night_lights"
+CONF_PRESENCE_SENSOR = "presence_sensor"
+CONF_LIGHT_SENSOR = "light_sensor"
+CONF_DETECTION_TIMEOUT = "detection_timeout"
+CONF_LONG_TIMEOUT = "long_timeout"
+CONF_SHORT_TIMEOUT = "short_timeout"
+CONF_NIGHT_MODE = "night_mode"
+CONF_NIGHT_MODE_SWITCH = "night_mode_switch"
+CONF_NIGHT_TIME_START = "night_time_start"
+CONF_NIGHT_TIME_END = "night_time_end"
 CONF_ADJACENT_ROOMS = "adjacent_rooms"
 
 # Timeout configuration
@@ -133,3 +140,13 @@ ATTR_OCCUPANCY_DURATION = "occupancy_duration"
 ATTR_ABSENCE_DURATION = "absence_duration"
 ATTR_LIGHT_LEVEL = "light_level"
 ATTR_NIGHT_MODE = "night_mode"
+
+# Sensor names
+SENSOR_MAIN_MANUAL_STATES = "sensor_main_manual_states"
+SENSOR_NIGHT_MANUAL_STATES = "sensor_night_manual_states"
+
+# Default values
+DEFAULT_SENSOR_MAIN_MANUAL_STATES = {}
+DEFAULT_SENSOR_NIGHT_MANUAL_STATES = {}
+
+BINARY_SENSOR_NIGHT_MODE = "night_mode"

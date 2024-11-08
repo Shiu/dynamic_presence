@@ -30,7 +30,13 @@ async def async_setup_entry(
                 unique_id=f"{entry.entry_id}_occupancy",
                 key="occupancy",
                 device_class=BinarySensorDeviceClass.OCCUPANCY,
-            )
+            ),
+            DynamicPresenceBinarySensor(
+                coordinator=coordinator,
+                unique_id=f"{entry.entry_id}_night_mode",
+                key="night_mode",
+                device_class=BinarySensorDeviceClass.RUNNING,
+            ),
         ]
     )
 
