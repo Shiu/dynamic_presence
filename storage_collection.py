@@ -28,6 +28,7 @@ class DynamicPresenceStorageData:
 class DynamicPresenceStorage:
     """Class to hold Dynamic Presence storage data."""
 
+    # 1. Core Initialization
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         """Initialize the storage."""
         self.hass = hass
@@ -48,6 +49,7 @@ class DynamicPresenceStorage:
             raise RuntimeError("Storage data not loaded. Call async_load first.")
         return self._data
 
+    # 2. State Type Validation
     def is_runtime_state(self, key: str) -> bool:
         """Check if key represents a runtime state."""
         return any(key.startswith(prefix) for prefix in RUNTIME_PREFIXES)
@@ -56,6 +58,7 @@ class DynamicPresenceStorage:
         """Check if key represents a configuration value."""
         return any(key.startswith(prefix) for prefix in CONFIG_PREFIXES)
 
+    # 3. Data Access
     def get_config_value(self, key: str) -> Any:
         """Get a configuration value.
 
@@ -66,6 +69,15 @@ class DynamicPresenceStorage:
             raise ValueError(f"Key {key} is not a configuration value")
         return self.data.states.get(key)
 
+    def get_state(self, key: str) -> Any:
+        """Get a state value from storage."""
+        return self.data.states.get(key)
+
+    def get_manual_state(self, entity_id: str) -> bool:
+        """Get a manual state from storage."""
+        return self.data.manual_states.get(entity_id, False)
+
+    # 4. Data Modification
     def set_runtime_state(self, key: str, value: Any) -> None:
         """Set a runtime state value.
 
@@ -77,6 +89,23 @@ class DynamicPresenceStorage:
         logStorage.debug("Setting runtime state %s = %s", key, value)
         self.data.states[key] = value
 
+    def set_state(self, key: str, value: Any) -> None:
+        """Set a state value in storage.
+
+        Raises:
+            ValueError: If key is not a valid state type
+        """
+        if not (self.is_runtime_state(key) or self.is_config_value(key)):
+            raise ValueError(f"Invalid state key: {key}")
+        logStorage.debug("Setting state %s = %s", key, value)
+        self.data.states[key] = value
+
+    def set_manual_state(self, entity_id: str, value: bool) -> None:
+        """Set a manual state in storage."""
+        logStorage.debug("Setting manual state %s = %s", entity_id, value)
+        self.data.manual_states[entity_id] = value
+
+    # 5. Storage Operations
     async def async_load(self) -> None:
         """Load the storage data."""
         stored = await self.storage.async_load()
@@ -104,27 +133,3 @@ class DynamicPresenceStorage:
         )
 
         logStorage.debug("Saved storage data for %s: %s", self.entry_id, self._data)
-
-    def get_state(self, key: str) -> Any:
-        """Get a state value from storage."""
-        return self.data.states.get(key)
-
-    def set_state(self, key: str, value: Any) -> None:
-        """Set a state value in storage.
-
-        Raises:
-            ValueError: If key is not a valid state type
-        """
-        if not (self.is_runtime_state(key) or self.is_config_value(key)):
-            raise ValueError(f"Invalid state key: {key}")
-        logStorage.debug("Setting state %s = %s", key, value)
-        self.data.states[key] = value
-
-    def get_manual_state(self, entity_id: str) -> bool:
-        """Get a manual state from storage."""
-        return self.data.manual_states.get(entity_id, False)
-
-    def set_manual_state(self, entity_id: str, value: bool) -> None:
-        """Set a manual state in storage."""
-        logStorage.debug("Setting manual state %s = %s", entity_id, value)
-        self.data.manual_states[entity_id] = value

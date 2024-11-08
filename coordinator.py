@@ -292,8 +292,12 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     # 2. Properties and State Access
     @property
     def active_lights(self) -> list:
-        """Get currently active light set."""
-        return self._presence_control.active_lights
+        """Get currently active light set based on mode."""
+        return (
+            self.night_lights
+            if self._presence_control.is_night_mode_active()
+            else self.lights
+        )
 
     @callback
     def _get_active_lights(self) -> list:
@@ -315,6 +319,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             "main": dict(self._manual_states.get("main", {})),
             "night": dict(self._manual_states.get("night", {})),
         }
+
+    def is_night_mode(self) -> bool:
+        """Check if night mode is currently active."""
+        return self._presence_control.is_night_mode_active()
 
     @property
     def switch_state(self, switch_id: str) -> bool:

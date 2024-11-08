@@ -13,10 +13,34 @@ logLightController = logging.getLogger("dynamic_presence.light_controller")
 class LightController:
     """Handles all light-related operations."""
 
+    # 1. Core Initialization
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize light controller."""
         self.hass = hass
 
+    # 2. Light State Checks
+    def check_any_lights_on(self, lights: List[str]) -> bool:
+        """Check if any of the specified lights are on."""
+        for light in lights:
+            try:
+                state = self.hass.states.get(light)
+                if state and state.state == STATE_ON:
+                    return True
+            except HomeAssistantError as err:
+                logLightController.error("Error checking light state: %s", err)
+        return False
+
+    def get_light_state(self, light: str) -> Optional[bool]:
+        """Get state of a specific light."""
+        try:
+            state = self.hass.states.get(light)
+            if state:
+                return state.state == STATE_ON
+        except HomeAssistantError as err:
+            logLightController.error("Error getting light state: %s", err)
+        return None
+
+    # 3. Light Operations
     async def turn_on_lights(self, lights: List[str]) -> None:
         """Turn on specified lights."""
         if not lights:
@@ -46,24 +70,3 @@ class LightController:
             logLightController.debug("Turning off lights: %s", lights)
         except ServiceNotFound as err:
             logLightController.error("Failed to turn off lights: %s", err)
-
-    def check_any_lights_on(self, lights: List[str]) -> bool:
-        """Check if any of the specified lights are on."""
-        for light in lights:
-            try:
-                state = self.hass.states.get(light)
-                if state and state.state == STATE_ON:
-                    return True
-            except HomeAssistantError as err:
-                logLightController.error("Error checking light state: %s", err)
-        return False
-
-    def get_light_state(self, light: str) -> Optional[bool]:
-        """Get state of a specific light."""
-        try:
-            state = self.hass.states.get(light)
-            if state:
-                return state.state == STATE_ON
-        except HomeAssistantError as err:
-            logLightController.error("Error getting light state: %s", err)
-        return None
