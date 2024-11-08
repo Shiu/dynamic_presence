@@ -3,18 +3,13 @@
 from enum import Enum
 import logging
 from typing import Dict, Any, TYPE_CHECKING
-from datetime import datetime as dt
+
 
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
-from .const import (
-    CONF_NIGHT_MODE_SWITCH,
-    CONF_NIGHT_TIME_START,
-    CONF_NIGHT_TIME_END,
-)
 
 if TYPE_CHECKING:
     from .coordinator import DynamicPresenceCoordinator
@@ -29,6 +24,53 @@ class RoomState(Enum):
     OCCUPIED = "occupied"
     DETECTION_TIMEOUT = "detection_timeout"
     COUNTDOWN = "countdown"
+
+
+class PresenceTimer:
+    """Timer management for presence detection."""
+
+    def __init__(self, hass, callback_method, logger) -> None:
+        """Initialize timer."""
+        self._hass = hass
+        self._callback = callback_method
+        self._logger = logger
+        self._timer = None
+        self._start_time = None
+        self._duration = None
+
+    @property
+    def is_active(self) -> bool:
+        """Check if timer is currently active."""
+        return self._timer is not None
+
+    @property
+    def remaining_time(self) -> float:
+        """Get remaining time in seconds."""
+        if not self.is_active or not self._start_time:
+            return 0
+        elapsed = (dt_util.utcnow() - self._start_time).total_seconds()
+        return max(0, self._duration - elapsed)
+
+    def cancel(self) -> None:
+        """Cancel the timer."""
+        if self._timer:
+            self._timer()
+            self._timer = None
+            self._start_time = None
+            self._duration = None
+            self._logger.debug("Timer cancelled")
+
+    def start(self, duration: float) -> None:
+        """Start the timer."""
+        if duration <= 0:
+            self._logger.warning("Invalid timer duration: %s", duration)
+            return
+
+        self.cancel()
+        self._start_time = dt_util.utcnow()
+        self._duration = duration
+        self._timer = async_call_later(self._hass, duration, self._callback)
+        self._logger.debug("Timer started for %s seconds", duration)
 
 
 class PresenceControl:
@@ -47,12 +89,12 @@ class PresenceControl:
         self._last_presence_time = None
         self._occupancy_start_time = None
         self._last_logged_state = None
-        self._detection_timer = None
-        self._countdown_timer = None
-        self._night_mode_switch = coordinator.entry.options.get(CONF_NIGHT_MODE_SWITCH)
-        self._night_mode_state = False
-        self._night_time_start = coordinator.entry.options.get(CONF_NIGHT_TIME_START)
-        self._night_time_end = coordinator.entry.options.get(CONF_NIGHT_TIME_END)
+        self._detection_timer = PresenceTimer(
+            self.hass, self._detection_timer_finished, logPresenceControl
+        )
+        self._countdown_timer = PresenceTimer(
+            self.hass, self._countdown_timer_finished, logPresenceControl
+        )
 
     # 2. Properties
     @property
@@ -97,11 +139,11 @@ class PresenceControl:
     @property
     def active_lights(self) -> list:
         """Get currently active light set based on mode."""
-        return (
-            self.coordinator.night_lights
-            if self.is_night_mode_active()
-            else self.coordinator.lights
-        )
+        return self.coordinator.active_lights
+
+    def is_night_mode_active(self) -> bool:
+        """Check if night mode is currently active."""
+        return self.coordinator.is_night_mode_active()
 
     # 3. State Management
     async def _update_state(self, new_state: RoomState) -> None:
@@ -196,73 +238,29 @@ class PresenceControl:
 
     # 4. Timer Management
     @callback
-    def _cancel_detection_timer(self) -> None:
-        """Cancel detection timer."""
-        if self._detection_timer is not None:
-            logPresenceControl.debug("Cancelling detection timer")
-            self._detection_timer = None
-
-    @callback
-    def _cancel_countdown_timer(self) -> None:
-        """Cancel countdown timer."""
-        if self._countdown_timer is not None:
-            logPresenceControl.debug("Cancelling countdown timer")
-            self._countdown_timer = None
-
-    @callback
     def _cancel_timers(self) -> None:
         """Cancel all active timers."""
-        if self._detection_timer:
-            self._detection_timer()
-            self._detection_timer = None
-
-        if self._countdown_timer:
-            self._countdown_timer()
-            self._countdown_timer = None
-
+        self._detection_timer.cancel()
+        self._countdown_timer.cancel()
         logPresenceControl.debug("All timers cancelled")
 
     @callback
     def _start_detection_timer(self) -> None:
         """Start the detection timeout timer."""
-        if self._detection_timer:
-            self._detection_timer()
-            self._detection_timer = None
-
-        detection_timeout = self.coordinator.detection_timeout
-        self._detection_timer = async_call_later(
-            self.hass, detection_timeout, self._detection_timer_finished
-        )
-        logPresenceControl.debug(
-            "Starting detection timer for %s seconds",
-            detection_timeout,
-        )
+        self._detection_timer.start(self.coordinator.detection_timeout)
 
     @callback
     def _start_countdown_timer(self) -> None:
         """Start the countdown timer."""
-        if self._countdown_timer:
-            self._countdown_timer()
-            self._countdown_timer = None
-
         timeout = (
             self.coordinator.short_timeout
             if self.is_night_mode_active()
             else self.coordinator.long_timeout
         )
-
-        logPresenceControl.debug(
-            "Starting countdown timer: %s seconds",
-            timeout,
-        )
-
-        self._countdown_timer = async_call_later(
-            self.hass, timeout, self._countdown_timer_finished
-        )
+        self._countdown_timer.start(timeout)
 
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""
-        self._detection_timer = None
         if self._state == RoomState.DETECTION_TIMEOUT:
             logPresenceControl.debug(
                 "Detection timeout expired, transitioning to countdown"
@@ -272,7 +270,6 @@ class PresenceControl:
 
     async def _countdown_timer_finished(self, _now) -> None:
         """Handle countdown timer completion."""
-        self._countdown_timer = None
         if self._state == RoomState.COUNTDOWN:
             logPresenceControl.debug("Countdown finished, transitioning to vacant")
             await self._update_state(RoomState.VACANT)
@@ -339,30 +336,3 @@ class PresenceControl:
         if self._state == RoomState.OCCUPIED:
             await self._update_state(RoomState.DETECTION_TIMEOUT)
             self._start_detection_timer()
-
-    # 6. Night Mode
-    def is_night_time(self) -> bool:
-        """Check if current time is within night time hours."""
-        if not self._night_time_start or not self._night_time_end:
-            return True
-
-        now = dt.now(self.hass.config.time_zone)
-        current_time = now.time()
-        start_time = dt.strptime(self._night_time_start, "%H:%M").time()
-        end_time = dt.strptime(self._night_time_end, "%H:%M").time()
-
-        if start_time <= end_time:
-            return start_time <= current_time <= end_time
-        else:
-            return current_time >= start_time or current_time <= end_time
-
-    def _check_night_mode_switch(self) -> bool:
-        """Check if night mode is forced by switch."""
-        return self.coordinator.data.get("switch_night_mode", False)
-
-    def is_night_mode_active(self) -> bool:
-        """Check if night mode is currently active."""
-        night_mode = self.coordinator.data.get("switch_night_mode", False)
-        if night_mode:
-            return True
-        return False
