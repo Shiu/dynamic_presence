@@ -294,7 +294,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     @property
     def active_lights(self) -> list:
         """Get the currently active light set based on mode."""
-        return self.night_lights if self.is_night_mode_active() else self.lights
+        return (
+            self.night_lights
+            if self.data.get("binary_sensor_night_mode", False)
+            else self.lights
+        )
 
     @property
     def manual_states(self) -> dict:
@@ -590,24 +594,17 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     err,
                 )
 
-        # Update night mode status - only use switch state
-        updated_data["binary_sensor_night_mode"] = bool(
-            self.data.get("switch_night_mode", False)
-        )
+        # Update night mode status - requires BOTH switch ON and within time window
+        switch_on = bool(self.data.get("switch_night_mode", False))
+        is_night_time = self.is_night_time()
+        updated_data["binary_sensor_night_mode"] = switch_on and is_night_time
 
         return updated_data
 
     # 8. Night Mode Management
     def is_night_mode_active(self) -> bool:
         """Check if night mode is active for light control."""
-        switch_on = bool(self.data.get("switch_night_mode", False))
-        is_night = self.is_night_time()
-
-        logCoordinator.debug(
-            "Night mode check - Switch: %s, Time: %s", switch_on, is_night
-        )
-
-        return switch_on or is_night
+        return bool(self.data.get("binary_sensor_night_mode", False))
 
     def is_night_time(self) -> bool:
         """Check if current time is within night time hours."""

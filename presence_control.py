@@ -254,7 +254,7 @@ class PresenceControl:
         """Start the countdown timer."""
         timeout = (
             self.coordinator.short_timeout
-            if self.is_night_mode_active()
+            if self.coordinator.data.get("binary_sensor_night_mode", False)
             else self.coordinator.long_timeout
         )
         self._countdown_timer.start(timeout)
@@ -292,7 +292,7 @@ class PresenceControl:
             ]:
                 timeout = (
                     self.coordinator.short_timeout
-                    if self.is_night_mode_active()
+                    if self.coordinator.data.get("binary_sensor_night_mode", False)
                     else self.coordinator.long_timeout
                 )
                 logPresenceControl.debug(
