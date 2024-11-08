@@ -373,10 +373,5 @@ class PresenceControl:
             return current_time >= start_time or current_time <= end_time
 
     def is_night_mode_active(self) -> bool:
-        """Return True if night mode is active."""
-        logPresenceControl.debug(
-            "Checking night mode - switch: %s, time: %s",
-            self.night_mode_switch_state,
-            self.is_night_time(),
-        )
-        return bool(self.night_mode_switch_state and self.is_night_time())
+        """Check if night mode is currently active."""
+        return self.coordinator.check_night_mode_active()
