@@ -8,7 +8,6 @@ from datetime import datetime as dt
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.event import async_call_later
-from homeassistant.const import STATE_ON
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -156,25 +155,23 @@ class PresenceControl:
     @callback
     def _start_countdown_timer(self) -> None:
         """Start the countdown timer."""
-        if self._countdown_timer is not None:
+        if self._countdown_timer:
             self._countdown_timer()
             self._countdown_timer = None
 
-        base_timeout = (
+        timeout = (
             self.coordinator.short_timeout
-            if self.coordinator.is_night_mode()
+            if self.is_night_mode_active()
             else self.coordinator.long_timeout
         )
 
-        # Subtract detection timeout from the countdown period
-        adjusted_timeout = max(0, base_timeout - self.coordinator.detection_timeout)
+        logPresenceControl.debug(
+            "Starting countdown timer: %s seconds",
+            timeout,
+        )
 
         self._countdown_timer = async_call_later(
-            self.hass, adjusted_timeout, self._countdown_timer_finished
-        )
-        logPresenceControl.debug(
-            "Starting countdown timer for %s seconds",
-            adjusted_timeout,
+            self.hass, timeout, self._countdown_timer_finished
         )
 
     async def _on_presence_sensor_activated(self) -> None:
@@ -205,18 +202,9 @@ class PresenceControl:
         if self._state == RoomState.OCCUPIED:
             self._last_presence_time = dt_util.utcnow()
 
-            # Check if any lights are on before starting detection timer
-            any_lights_on = False
-            for light in self.coordinator.active_lights:
-                try:
-                    state = self.hass.states.get(light)
-                    if state and state.state == STATE_ON:
-                        any_lights_on = True
-                        break
-                except HomeAssistantError as err:
-                    logPresenceControl.error("Error checking light state: %s", err)
-
-            if any_lights_on:
+            if self.coordinator.light_controller.check_any_lights_on(
+                self.active_lights
+            ):
                 await self._update_state(RoomState.DETECTION_TIMEOUT)
                 self._start_detection_timer()
             else:
@@ -246,7 +234,7 @@ class PresenceControl:
             ]:
                 timeout = (
                     self.coordinator.short_timeout
-                    if self.coordinator.is_night_mode()
+                    if self.is_night_mode_active()
                     else self.coordinator.long_timeout
                 )
                 logPresenceControl.debug(
@@ -262,29 +250,12 @@ class PresenceControl:
                 err,
             )
 
-    async def start_detection_timer(self) -> None:
-        """Public method to start detection timer."""
-        await self._start_detection_timer()
-
-    async def start_countdown_timer(self) -> None:
-        """Public method to start countdown timer."""
-        await self._start_countdown_timer()
-
     async def handle_detection_timeout(self) -> None:
         """Handle detection timeout completion."""
         if self.state == RoomState.DETECTION_TIMEOUT:
-            # Check if any lights are still on
-            any_lights_on = False
-            for light in self.coordinator.active_lights:
-                try:
-                    state = self.hass.states.get(light)
-                    if state and state.state == STATE_ON:
-                        any_lights_on = True
-                        break
-                except HomeAssistantError as err:
-                    logPresenceControl.error("Error checking light state: %s", err)
-
-            if any_lights_on:
+            if self.coordinator.light_controller.check_any_lights_on(
+                self.active_lights
+            ):
                 logPresenceControl.debug(
                     "Detection timeout expired, starting countdown"
                 )
@@ -292,18 +263,12 @@ class PresenceControl:
                 self._start_countdown_timer()
             else:
                 logPresenceControl.debug(
-                    "Detection timeout expired, all lights off - clearing manual states"
+                    "Detection timeout expired, all lights off - room is vacant"
                 )
-                await self.coordinator.clear_manual_states()
-                logPresenceControl.debug("Room is now vacant")
                 await self._update_state(RoomState.VACANT)
 
-    async def _update_state(self, new_state: RoomState) -> None:
-        """Update state and notify coordinator."""
-        if new_state == self._state:
-            return
-
-        # Validate state transition
+    def _validate_state_transition(self, new_state: RoomState) -> bool:
+        """Validate state transition."""
         valid_transitions = {
             RoomState.VACANT: [RoomState.OCCUPIED],
             RoomState.OCCUPIED: [RoomState.DETECTION_TIMEOUT, RoomState.VACANT],
@@ -317,6 +282,15 @@ class PresenceControl:
                 self._state.value,
                 new_state.value,
             )
+            return False
+        return True
+
+    async def _update_state(self, new_state: RoomState) -> None:
+        """Update state and notify coordinator."""
+        if new_state == self._state:
+            return
+
+        if not self._validate_state_transition(new_state):
             return
 
         logPresenceControl.info(
@@ -326,8 +300,14 @@ class PresenceControl:
             self._last_presence_time,
         )
 
+        # Update internal state before notifying coordinator
         self._state = new_state
-        logPresenceControl.debug("Notifying coordinator of state change")
+
+        # Update occupancy tracking times
+        if new_state == RoomState.OCCUPIED:
+            self._occupancy_start_time = dt_util.utcnow()
+        elif new_state == RoomState.VACANT:
+            self._occupancy_start_time = None
 
         try:
             await self.coordinator.async_handle_state_changed(new_state)
@@ -338,24 +318,18 @@ class PresenceControl:
         """Handle countdown timer completion."""
         self._countdown_timer = None
         if self._state == RoomState.COUNTDOWN:
-            logPresenceControl.debug("Countdown finished, room is now vacant")
+            logPresenceControl.debug("Countdown finished, transitioning to vacant")
             await self._update_state(RoomState.VACANT)
 
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""
         self._detection_timer = None
         if self._state == RoomState.DETECTION_TIMEOUT:
-            logPresenceControl.debug("Detection timeout expired, starting countdown")
+            logPresenceControl.debug(
+                "Detection timeout expired, transitioning to countdown"
+            )
             await self._update_state(RoomState.COUNTDOWN)
             self._start_countdown_timer()
-
-    @property
-    def night_mode_switch_state(self) -> bool:
-        """Get the current state of the night mode switch."""
-        if not self._night_mode_switch:
-            return False
-        state = self.hass.states.get(self._night_mode_switch)
-        return state is not None and state.state == "on"
 
     def is_night_time(self) -> bool:
         """Check if current time is within night time hours."""
@@ -372,6 +346,25 @@ class PresenceControl:
         else:  # Handles overnight periods (e.g., 22:00 - 06:00)
             return current_time >= start_time or current_time <= end_time
 
+    def _check_night_mode_switch(self) -> bool:
+        """Check if night mode is forced by switch."""
+        return self.coordinator.data.get("switch_night_mode", False)
+
     def is_night_mode_active(self) -> bool:
         """Check if night mode is currently active."""
-        return self.coordinator.check_night_mode_active()
+        # First check if night mode switch exists and is on
+        night_mode = self.coordinator.data.get("switch_night_mode", False)
+        if night_mode:
+            return True
+
+        # If switch is off, don't check time constraints
+        return False
+
+    @property
+    def active_lights(self) -> list:
+        """Get currently active light set based on mode."""
+        return (
+            self.coordinator.night_lights
+            if self.is_night_mode_active()
+            else self.coordinator.lights
+        )

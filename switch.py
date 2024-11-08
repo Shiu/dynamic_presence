@@ -1,12 +1,14 @@
 """Switch platform for Dynamic Presence integration."""
 
 from __future__ import annotations
+from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 
 from .const import (
     DOMAIN,
@@ -97,8 +99,8 @@ class DynamicPresenceSwitch(
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the entity on."""
-        await self.coordinator.async_switch_changed(self._key, True)
+        await self.coordinator.async_entity_changed("switch", self._key, True)
 
-    async def async_turn_off(self, **kwargs) -> None:
-        """Turn the entity off."""
-        await self.coordinator.async_switch_changed(self._key, False)
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off automation."""
+        await self.coordinator.async_entity_changed("switch", self._key, False)

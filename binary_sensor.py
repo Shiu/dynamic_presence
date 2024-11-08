@@ -35,7 +35,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
                 unique_id=f"{entry.entry_id}_night_mode",
                 key="night_mode",
-                device_class=BinarySensorDeviceClass.RUNNING,
+                device_class=None,
             ),
         ]
     )

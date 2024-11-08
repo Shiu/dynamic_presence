@@ -11,9 +11,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.template import TemplateError
-from homeassistant.util import dt as dt_util
+
 from homeassistant.const import STATE_ON
 
+from .light_control import LightController
 from .presence_control import PresenceControl, RoomState
 from .storage_collection import DynamicPresenceStorage
 from .const import (
@@ -153,6 +154,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         # Initialize coordinator
         hass.async_create_task(self.async_initialize())
 
+        self.light_controller = LightController(hass)
+
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
         # Load stored manual states
@@ -223,20 +226,18 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def async_config_entry_first_refresh(self) -> None:
         """Initialize the coordinator."""
         # Load runtime states from storage
-        stored_data = await self._store.async_load()
+        await self._store.async_load()
 
         # Initialize manual states
-        if stored_data and "manual_states" in stored_data:
-            if isinstance(stored_data["manual_states"], dict):
-                if (
-                    "main" in stored_data["manual_states"]
-                    and "night" in stored_data["manual_states"]
-                ):
-                    self._manual_states = stored_data["manual_states"]
+        stored_manual_states = self._store.data.manual_states
+        if stored_manual_states:
+            if isinstance(stored_manual_states, dict):
+                if "main" in stored_manual_states and "night" in stored_manual_states:
+                    self._manual_states = stored_manual_states
                 else:
                     # Convert old format
                     self._manual_states = {
-                        "main": stored_data["manual_states"],
+                        "main": stored_manual_states,
                         "night": {light: True for light in self.night_lights},
                     }
         else:
@@ -246,6 +247,20 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 "night": {light: True for light in self.night_lights},
             }
             logCoordinator.debug("New room: Initializing all light states to ON")
+
+        # Initialize switch states from storage
+        stored_states = self._store.data.states
+        switch_keys = [
+            "automation",
+            "auto_on",
+            "auto_off",
+            "night_mode",
+            "night_manual_on",
+        ]
+        for key in switch_keys:
+            stored_key = f"switch_{key}"
+            if stored_key in stored_states:
+                self.data[stored_key] = stored_states[stored_key]
 
         await self._store.async_save()
         await self._async_update_data()
@@ -276,20 +291,14 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     # 2. Properties and State Access
     @property
-    def active_lights(self) -> list[str]:
-        """Get the currently active light entities based on mode."""
-        if self._presence_control.is_night_mode_active():
-            lights = self.entry.options.get(CONF_NIGHT_LIGHTS, [])
-            logCoordinator.debug("Night mode active, using night lights: %s", lights)
-            return lights
-        lights = self.entry.options.get(CONF_LIGHTS, [])
-        logCoordinator.debug("Normal mode active, using main lights: %s", lights)
-        return lights
+    def active_lights(self) -> list:
+        """Get currently active light set."""
+        return self._presence_control.active_lights
 
     @callback
     def _get_active_lights(self) -> list:
         """Get the currently active set of lights based on night mode state."""
-        return self.night_lights if self.is_night_mode() else self.lights
+        return self._presence_control.active_lights
 
     @property
     def manual_states(self) -> dict:
@@ -323,35 +332,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         state = self.hass.states.get(switch_entity)
         return state is not None and state.state == "on"
 
-    def check_night_mode_active(self) -> bool:
-        """Check if night mode should be active based on all conditions."""
-        # First check if night mode switch is enabled
-        if not self.data["switch_night_mode"]:
-            return False
-
-        # Then check time conditions
-        current_time = dt_util.now().time()
-        start_time = dt_util.parse_time(self.night_mode_start)
-        end_time = dt_util.parse_time(self.night_mode_end)
-
-        if not start_time or not end_time:
-            return False
-
-        # Handle overnight periods (when end time is less than start time)
-        if end_time < start_time:
-            return current_time >= start_time or current_time <= end_time
-
-        # Normal period within same day
-        return start_time <= current_time <= end_time
-
-    def _is_night_mode(self) -> bool:
-        """Check if night mode is active."""
-        return self.check_night_mode_active()
-
-    def is_night_mode(self) -> bool:
-        """Public method to check if night mode is active."""
-        return self._is_night_mode()
-
     # 3. Manual State Management
     async def _async_light_changed(self, event) -> None:
         """Handle light state changes."""
@@ -384,34 +364,15 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         active_lights = self._get_active_lights()
         if not active_lights:
             return
-
-        for light in active_lights:
-            try:
-                domain = light.split(".")[0]
-                await self.hass.services.async_call(
-                    domain, "turn_on", {"entity_id": light}, blocking=True
-                )
-            except ServiceNotFound as err:
-                logCoordinator.error("Failed to turn on %s: %s", light, err)
+        await self.light_controller.turn_on_lights(active_lights)
 
     # 4. Light Control
     async def _turn_off_lights(self) -> None:
         """Turn off all active lights."""
         active_lights = self.active_lights
-
         if not active_lights:
             return
-
-        try:
-            await self.hass.services.async_call(
-                "light",
-                "turn_off",
-                {"entity_id": active_lights},
-                blocking=True,
-            )
-            logCoordinator.debug("Turning off active lights: %s", active_lights)
-        except ServiceNotFound as err:
-            logCoordinator.error("Failed to turn off lights: %s", err)
+        await self.light_controller.turn_off_lights(active_lights)
 
     # 5. Configuration and Options
     @callback
@@ -451,10 +412,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             self.hass.config_entries.async_update_entry(self.entry, data=new_data)
 
     # 6. Event Handlers
-    async def async_switch_changed(self, key: str, value: bool) -> None:
-        """Handle switch changes."""
-        await self.async_entity_changed("switch", key, value)
-
     async def async_entity_changed(
         self, entity_type: str, key: str, value: Any
     ) -> None:
@@ -465,9 +422,18 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             self.data[data_key] = value
             self.async_set_updated_data(self.data)
 
+            # Handle night mode changes
+            if data_key == "switch_night_mode":
+                await self._handle_mode_changed(value)
+
             # Save to storage
-            self._store.set_state(data_key, value)
-            await self._store.async_save()
+            if entity_type == "switch":
+                self._store.set_state(data_key, value)
+                await self._store.async_save()
+
+            # Update timers if needed
+            if entity_type == "number":
+                await self._presence_control.update_timers(entity_type, key)
 
         except (HomeAssistantError, ServiceNotFound, TemplateError) as err:
             logCoordinator.error(
@@ -486,18 +452,33 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def _handle_state_changed(self, new_state: RoomState) -> None:
         """Handle room state changes."""
         if new_state == RoomState.OCCUPIED:
-            active_lights = self.active_lights
+            # Check if we should turn on lights based on Auto-On and Night Manual-On settings
+            auto_on = self.data.get("switch_auto_on", False)
+            night_manual_on = self.data.get("switch_night_manual_on", False)
+            is_night_mode = self._presence_control.is_night_mode_active()
+
+            # Don't turn on lights if Night Manual-On is enabled during night mode
+            if not auto_on or (is_night_mode and night_manual_on):
+                logCoordinator.debug(
+                    "Skipping light activation: auto_on=%s, night_mode=%s, night_manual_on=%s",
+                    auto_on,
+                    is_night_mode,
+                    night_manual_on,
+                )
+                return
+
+            mode = "night" if is_night_mode else "main"
+            lights_to_control = self.night_lights if mode == "night" else self.lights
             manual_states = self.manual_states
-            mode = "night" if self._presence_control.is_night_mode_active() else "main"
 
             # If all stored states are off, turn on all lights
             all_lights_off = all(
-                not manual_states[mode].get(light, True) for light in active_lights
+                not manual_states[mode].get(light, True) for light in lights_to_control
             )
 
             if all_lights_off:
                 logCoordinator.debug("All lights were off - turning on all lights")
-                for light in active_lights:
+                for light in lights_to_control:
                     try:
                         await self.hass.services.async_call(
                             "light",
@@ -510,10 +491,8 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             else:
                 # Restore previous light states
                 logCoordinator.debug("Restoring previous light states")
-                for light in active_lights:
-                    if manual_states[mode].get(
-                        light, True
-                    ):  # Default to ON for new lights
+                for light in lights_to_control:
+                    if manual_states[mode].get(light, True):
                         try:
                             await self.hass.services.async_call(
                                 "light",
@@ -525,17 +504,71 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                             logCoordinator.error("Failed to turn on %s: %s", light, err)
 
         elif new_state == RoomState.VACANT:
-            await self._turn_off_lights()
+            # Check if we should turn off lights based on Auto-Off
+            auto_off = self.data.get("switch_auto_off", False)
+            if not auto_off:
+                logCoordinator.debug("Auto-off disabled - keeping current light states")
+                return
+
+            mode = "night" if self._presence_control.is_night_mode_active() else "main"
+            lights_to_control = self.night_lights if mode == "night" else self.lights
+
+            # Turn off all lights from both sets
+            all_lights = set(self.lights + self.night_lights)
+            for light in all_lights:
+                try:
+                    await self.hass.services.async_call(
+                        "light",
+                        "turn_off",
+                        {"entity_id": light},
+                        blocking=True,
+                    )
+                except ServiceNotFound as err:
+                    logCoordinator.error("Failed to turn off %s: %s", light, err)
+
+            # Reset manual states for active mode only
+            for light in lights_to_control:
+                self._manual_states[mode][light] = True
+            await self._store.async_save()
 
         await self.async_refresh()
 
-    async def async_number_changed(self, _key: str, _value: float) -> None:  # pylint: disable=unused-argument
-        """Handle number changes - removed as numbers are now in options."""
-        return
+    async def _handle_mode_changed(self, is_night_mode: bool) -> None:
+        """Handle transition between normal and night mode."""
+        if self._presence_control.state == RoomState.OCCUPIED:
+            # Get the new set of lights to control
+            lights_to_control = self.night_lights if is_night_mode else self.lights
+            manual_states = self.manual_states
+            mode = "night" if is_night_mode else "main"
 
-    async def async_time_changed(self, _key: str, _value: str) -> None:  # pylint: disable=unused-argument
-        """Handle time changes - removed as times are now in options."""
-        return
+            # Turn off lights that aren't in the new mode's set
+            all_lights = set(self.lights + self.night_lights)
+            for light in all_lights:
+                if light not in lights_to_control:
+                    try:
+                        await self.hass.services.async_call(
+                            "light",
+                            "turn_off",
+                            {"entity_id": light},
+                            blocking=True,
+                        )
+                    except ServiceNotFound as err:
+                        logCoordinator.error("Failed to turn off %s: %s", light, err)
+
+            # Turn on lights according to their manual states in the new mode
+            for light in lights_to_control:
+                if manual_states[mode].get(light, True):
+                    try:
+                        await self.hass.services.async_call(
+                            "light",
+                            "turn_on",
+                            {"entity_id": light},
+                            blocking=True,
+                        )
+                    except ServiceNotFound as err:
+                        logCoordinator.error("Failed to turn on %s: %s", light, err)
+
+        await self.async_refresh()
 
     # 7. Data Updates
     async def _async_update_data(self) -> Dict[str, Any]:
@@ -544,19 +577,18 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             return self.data
 
         updated_data = self.data.copy()
-        current_state = self._presence_control.state
 
-        # Update occupancy binary sensor
+        # Update state-based sensors
+        current_state = self._presence_control.state
         updated_data["binary_sensor_occupancy"] = current_state in [
             RoomState.OCCUPIED,
             RoomState.DETECTION_TIMEOUT,
         ]
 
-        # Get duration data from presence control
-        durations = self._presence_control.durations
-        updated_data.update(durations)
+        # Update durations
+        updated_data.update(self._presence_control.durations)
 
-        # Update light level only if sensor is configured
+        # Update light sensor if configured
         if self.light_sensor:
             try:
                 state = self.hass.states.get(self.light_sensor)
@@ -569,43 +601,9 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     err,
                 )
 
-        is_night_mode = self._presence_control.is_night_mode_active()
-        logCoordinator.debug("Night mode status: %s", is_night_mode)
-
-        updated_data["binary_sensor_night_mode"] = is_night_mode
+        # Update night mode status
+        updated_data["binary_sensor_night_mode"] = (
+            self._presence_control.is_night_mode_active()
+        )
 
         return updated_data
-
-    # 8. Timer Management
-    async def update_timers(self, control_type: str, key: str) -> None:
-        """Update running timers when control values change."""
-        try:
-            if (
-                self._presence_control.state == RoomState.DETECTION_TIMEOUT
-                and key == "detection_timeout"
-            ):
-                logCoordinator.debug(
-                    "Updating detection timer: %s seconds",
-                    self.detection_timeout,
-                )
-                await self._presence_control.start_detection_timer()
-            elif self._presence_control.state == RoomState.COUNTDOWN and key in [
-                "long_timeout",
-                "short_timeout",
-            ]:
-                timeout = (
-                    self.short_timeout if self.is_night_mode() else self.long_timeout
-                )
-                logCoordinator.debug(
-                    "Updating countdown timer: %s seconds",
-                    timeout,
-                )
-                await self._presence_control.start_countdown_timer()
-        except (HomeAssistantError, TemplateError) as err:
-            logCoordinator.warning(
-                "Error updating timers for %s.%s: %s",
-                control_type,
-                key,
-                err,
-                exc_info=True,
-            )
