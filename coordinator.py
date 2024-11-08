@@ -1,6 +1,6 @@
 """Coordinator for Dynamic Presence integration."""
 
-from datetime import datetime as dt, timedelta
+from datetime import timedelta
 import logging
 from typing import Any, Dict
 
@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.template import TemplateError
+from homeassistant.util import dt as dt_util
 
 from homeassistant.const import STATE_ON
 
@@ -292,7 +293,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     # 2. Properties and State Access
     @property
     def active_lights(self) -> list:
-        """Get currently active light set based on mode."""
+        """Get the currently active light set based on mode."""
         return self.night_lights if self.is_night_mode_active() else self.lights
 
     @property
@@ -304,10 +305,6 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 "night": {},
             }
         return self._manual_states
-
-    def is_night_mode_active(self) -> bool:
-        """Check if night mode is currently active."""
-        return self._check_night_mode_switch() or self.is_night_time()
 
     @property
     def switch_state(self, switch_id: str) -> bool:
@@ -593,29 +590,71 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     err,
                 )
 
-        # Update night mode status
-        updated_data["binary_sensor_night_mode"] = (
-            self._presence_control.is_night_mode_active()
+        # Update night mode status - only use switch state
+        updated_data["binary_sensor_night_mode"] = bool(
+            self.data.get("switch_night_mode", False)
         )
 
         return updated_data
 
     # 8. Night Mode Management
+    def is_night_mode_active(self) -> bool:
+        """Check if night mode is active for light control."""
+        switch_on = bool(self.data.get("switch_night_mode", False))
+        is_night = self.is_night_time()
+
+        logCoordinator.debug(
+            "Night mode check - Switch: %s, Time: %s", switch_on, is_night
+        )
+
+        return switch_on or is_night
+
     def is_night_time(self) -> bool:
         """Check if current time is within night time hours."""
         if not self.night_mode_start or not self.night_mode_end:
-            return True
+            logCoordinator.debug(
+                "Night time check - No times configured: start=%s, end=%s",
+                self.night_mode_start,
+                self.night_mode_end,
+            )
+            return False
 
-        now = dt.now(self.hass.config.time_zone)
-        current_time = now.time()
-        start_time = dt.strptime(self.night_mode_start, "%H:%M").time()
-        end_time = dt.strptime(self.night_mode_end, "%H:%M").time()
+        current_time = dt_util.now().time()
+        start_time = dt_util.parse_time(self.night_mode_start)
+        end_time = dt_util.parse_time(self.night_mode_end)
 
-        if start_time <= end_time:
-            return start_time <= current_time <= end_time
+        # For overnight periods (e.g., 20:00 to 08:00)
+        if start_time > end_time:
+            # Is night if time is after start OR before end
+            is_night = current_time >= start_time or current_time <= end_time
         else:
-            return current_time >= start_time or current_time <= end_time
+            # For same-day periods (e.g., 08:00 to 20:00)
+            is_night = start_time <= current_time <= end_time
+
+        logCoordinator.debug(
+            "Night time check - Current: %s, Start: %s, End: %s, Is Night: %s",
+            current_time,
+            start_time,
+            end_time,
+            is_night,
+        )
+
+        return is_night
 
     def _check_night_mode_switch(self) -> bool:
         """Check if night mode is forced by switch."""
-        return self.data.get("switch_night_mode", False)
+        switch_state = bool(self.data.get("switch_night_mode", False))
+        logCoordinator.debug("Night mode switch state: %s", switch_state)
+        return switch_state
+
+    async def handle_mode_change(self) -> None:
+        """Handle transition between normal and night mode."""
+        is_night_mode = self.is_night_mode_active()
+        lights_to_control = self.night_lights if is_night_mode else self.lights
+
+        if self._presence_control.state == RoomState.OCCUPIED:
+            await self.light_controller.update_active_lights(
+                is_night_mode, lights_to_control, self._manual_states
+            )
+
+        await self.async_refresh()
