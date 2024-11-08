@@ -330,7 +330,7 @@ class PresenceControl:
         logPresenceControl.debug("Notifying coordinator of state change")
 
         try:
-            await self.coordinator.handle_state_changed(new_state)
+            await self.coordinator.async_handle_state_changed(new_state)
         except (HomeAssistantError, ServiceNotFound) as err:
             logPresenceControl.error("Error notifying coordinator: %s", err)
 
