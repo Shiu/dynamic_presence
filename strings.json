@@ -3,78 +3,137 @@
   "config": {
     "step": {
       "user": {
-        "title": "Dynamic Presence Setup",
-        "description": "Dynamic Presence automatically controls lights and devices based on room occupancy. It uses presence sensors to detect when someone enters or leaves a room, adjusting device states accordingly.",
+        "title": "Add a New Room",
+        "description": "Set up dynamic presence control for a room",
         "data": {
-          "room_name": "Room Name",
-          "presence_sensor": "Presence Sensor",
-          "light_sensor": "Light Sensor",
-          "controlled_entities": "Controlled Entities",
-          "night_mode_controlled_entities": "Night Mode Controlled Entities",
-          "night_mode_entities_addmode": "Night Mode Entities Add Mode",
-          "remote_control_timeout": "Remote Control Timeout"
-        },
-        "data_description": {
-          "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
-          "presence_sensor": "Select the binary sensor that detects presence in this room. This can be a motion sensor, mmWave sensor, or any binary sensor that indicates occupancy.",
-          "light_sensor": "Select the sensor that detects light in this room. This can be a light sensor",
-          "controlled_entities": "Select the entities to be controlled by Dynamic Presence. These can include lights, smart plugs, switches, or any entity that can be turned on or off based on room occupancy.",
-          "night_mode_controlled_entities": "Select entities to be controlled specifically during night mode. If not set, regular controlled entities will be used.",
-          "night_mode_entities_addmode": "Choose how night mode entities behave: 'additive' (night mode entities are added to regular entities) or 'exclusive' (only night mode entities are used during night mode).",
-          "remote_control_timeout": "The time (in seconds) to wait before turning off controlled entities after the presence sensor reports no occupancy."
+          "name": "Room Name"
         }
       }
+    },
+    "error": {
+      "invalid_presence_sensor": "Selected presence sensor is invalid or not a binary sensor",
+      "invalid_lights": "One or more selected lights are invalid",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Room is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Configure Dynamic Presence",
-        "description": "Adjust the settings for the Dynamic Presence integration in this room.",
+        "title": "Configure Room Settings",
+        "description": "Customize how presence detection and lighting control work in this room",
         "data": {
-          "room_name": "Room Name",
-          "enable": "Enable",
           "presence_sensor": "Presence Sensor",
-          "light_sensor": "Light Sensor",
-          "controlled_entities": "Controlled Entities",
-          "manage_on_presence": "Manage on Presence",
-          "manage_on_clear": "Manage on Clear",
-          "presence_timeout": "Presence Timeout",
-          "short_absence_threshold": "Short Absence Threshold",
-          "light_threshold": "Light Threshold",
-          "active_room_threshold": "Active Room Threshold",
-          "active_room_timeout": "Active Room Timeout",
-          "night_mode_enable": "Enable Night Mode",
-          "night_mode_start": "Night Mode Start",
-          "night_mode_end": "Night Mode End",
-          "night_mode_scale": "Night Mode Scale",
-          "night_mode_controlled_entities": "Night Mode Controlled Entities",
-          "night_mode_entities_addmode": "Night Mode Entities Add Mode",
-          "night_mode_override_on_presence": "Night Mode Override On Presence",
-          "remote_control_timeout": "Remote Control Timeout (seconds) - Time before lights turn off after manual control in empty room"
+          "lights": "Main Lights",
+          "night_lights": "Night Mode Lights",
+          "light_sensor": "Light Level Sensor",
+          "adjacent_rooms": "Adjacent Rooms",
+          "detection_timeout": "Detection Timeout",
+          "long_timeout": "Long Timeout",
+          "short_timeout": "Short Timeout",
+          "light_threshold": "Light Level Threshold",
+          "night_mode_start": "Night Mode Start Time",
+          "night_mode_end": "Night Mode End Time"
         },
         "data_description": {
-          "room_name": "The name of the room where this Dynamic Presence configuration will be applied.",
-          "enable": "Enable or disable Dynamic Presence functionality in this room.",
-          "presence_sensor": "Select the binary sensor that detects presence in this room. This can be a motion sensor, mmWave sensor, or any binary sensor that indicates occupancy.",
-          "light_sensor": "Select the sensor that detects light in this room. This can be a light sensor",
-          "controlled_entities": "Select the entities to be controlled by Dynamic Presence. These can include lights, smart plugs, switches, or any entity that can be turned on or off based on room occupancy.",
-          "manage_on_presence": "Enable or disable management of controlled entities when the presence sensor reports occupancy.",
-          "manage_on_clear": "Enable or disable management of controlled entities when the presence sensor reports no occupancy.",
-          "presence_timeout": "The time (in seconds) to wait before turning off controlled entities after the presence sensor reports no occupancy.",
-          "short_absence_threshold": "The time (in seconds) after which a short absence is considered confirmed.",
-          "light_threshold": "The light level threshold (in lux) below which controlled entities will be turned on.",
-          "active_room_threshold": "The time (in minutes) of continuous occupancy required for the room to be considered 'active'.",
-          "active_room_timeout": "The extended time (in seconds) to wait before turning off controlled entities in an 'active' room.",
-          "night_mode_enable": "Enable or disable night mode functionality.",
-          "night_mode_start": "The time when night mode begins (HH:MM, 24-hour clock).",
-          "night_mode_end": "The time when night mode ends (HH:MM, 24-hour clock).",
-          "night_mode_scale": "Scale factor for adjusting presence timeout during night mode.",
-          "night_mode_controlled_entities": "Select entities to be controlled specifically during night mode.",
-          "night_mode_entities_addmode": "Choose how night mode entities behave: 'additive' or 'exclusive'.",
-          "night_mode_override_on_presence": "Sets Manage On Presence to True during night mode.",
-          "remote_control_timeout": "The time (in seconds) to wait before turning off controlled entities after the presence sensor reports no occupancy."
+          "presence_sensor": "Motion or occupancy sensor that detects presence in the room",
+          "lights": "Primary lights that will be controlled based on presence",
+          "night_lights": "Alternative set of lights used during night mode",
+          "light_sensor": "Optional sensor to measure ambient light levels",
+          "adjacent_rooms": "Other rooms that should be considered for presence detection",
+          "detection_timeout": "Seconds to wait after motion stops before starting countdown (1-30)",
+          "long_timeout": "Seconds to wait before turning off lights during day (30-3600)",
+          "short_timeout": "Seconds to wait before turning off lights during night (10-300)",
+          "light_threshold": "Light level below which lights will be activated (0-1000 lux)",
+          "night_mode_start": "Time when night mode should begin",
+          "night_mode_end": "Time when night mode should end"
         }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "occupancy": {
+        "name": "Occupancy",
+        "state": {
+          "on": "Occupied",
+          "off": "Vacant"
+        }
+      },
+      "night_mode": {
+        "name": "Night Mode Status",
+        "state": {
+          "on": "True",
+          "off": "False"
+        }
+      }
+    },
+    "number": {
+      "detection_timeout": {
+        "name": "Detection Timeout"
+      },
+      "long_timeout": {
+        "name": "Long Timeout"
+      },
+      "short_timeout": {
+        "name": "Short Timeout"
+      },
+      "light_threshold": {
+        "name": "Light Threshold"
+      }
+    },
+    "sensor": {
+      "occupancy_duration": {
+        "name": "Occupancy Duration"
+      },
+      "absence_duration": {
+        "name": "Absence Duration"
+      },
+      "light_level": {
+        "name": "Light Level"
+      },
+      "main_manual_states": {
+        "name": "Main Manual States",
+        "state_attributes": {
+          "lights": {
+            "name": "Light States"
+          }
+        }
+      },
+      "night_manual_states": {
+        "name": "Night Manual States",
+        "state_attributes": {
+          "lights": {
+            "name": "Light States"
+          }
+        }
+      }
+    },
+    "switch": {
+      "automation": {
+        "name": "Room Automation"
+      },
+      "auto_on": {
+        "name": "Auto-On"
+      },
+      "auto_off": {
+        "name": "Auto-Off"
+      },
+      "night_mode": {
+        "name": "Night Mode"
+      },
+      "night_manual_on": {
+        "name": "Night Manual-On"
+      }
+    },
+    "time": {
+      "night_mode_start": {
+        "name": "Night Mode Start"
+      },
+      "night_mode_end": {
+        "name": "Night Mode End"
       }
     }
   }

@@ -6,4 +6,4 @@ pytest.ini
 sftp.json
 launch.json
 tasks.json
-DESIGN.md
+RESTRUCTURE.md
