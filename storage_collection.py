@@ -106,7 +106,7 @@ class DynamicPresenceStorage:
         self.data.manual_states[entity_id] = value
 
     # 5. Storage Operations
-    async def async_load(self) -> None:
+    async def async_load(self) -> dict | None:
         """Load the storage data."""
         stored = await self.storage.async_load()
 
@@ -115,13 +115,15 @@ class DynamicPresenceStorage:
             stored = {}
 
         states = stored.get("states", {})
-        manual_states = stored.get("manual_states", {})
+        manual_states = stored.get("manual_states", {"main": {}, "night": {}})
 
         self._data = DynamicPresenceStorageData(
             states=states, manual_states=manual_states
         )
 
         logStorage.debug("Loaded storage data for %s: %s", self.entry_id, self._data)
+
+        return manual_states
 
     async def async_save(self) -> None:
         """Save data to storage."""
