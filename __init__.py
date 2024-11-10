@@ -15,6 +15,7 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_ADJACENT_ROOMS, DOMAIN
 from .coordinator import DynamicPresenceCoordinator
@@ -31,14 +32,13 @@ PLATFORMS = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
     coordinator = DynamicPresenceCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
+    await coordinator.async_initialize()
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
 
@@ -78,6 +78,34 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options."""
-    await hass.config_entries.async_reload(entry.entry_id)
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    # Store previous state
+    had_night_mode = coordinator.has_night_mode
+    had_light_sensor = coordinator.has_light_sensor
+
+    # Update coordinator
+    coordinator.update_from_options(entry)
+
+    if (
+        coordinator.has_night_mode != had_night_mode
+        or coordinator.has_light_sensor != had_light_sensor
+    ):
+        # Clean up entity registry first
+        ent_reg = er.async_get(hass)
+        entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+
+        # Remove entities that shouldn't exist anymore
+        for entity_entry in entries:
+            if (
+                not coordinator.has_night_mode
+                and "night" in entity_entry.unique_id
+                or not coordinator.has_light_sensor
+                and "light_level" in entity_entry.unique_id
+            ):
+                ent_reg.async_remove(entity_entry.entity_id)
+
+        # Trigger a reload of the entry
+        await hass.config_entries.async_reload(entry.entry_id)

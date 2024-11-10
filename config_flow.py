@@ -57,33 +57,63 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
+        errors = {}
+
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME],
-                data={CONF_NAME: user_input[CONF_NAME]},
-                options={
-                    CONF_PRESENCE_SENSOR: None,
-                    CONF_LIGHTS: [],
-                    CONF_DETECTION_TIMEOUT: NUMBER_CONFIG[CONF_DETECTION_TIMEOUT][
-                        "default"
-                    ],
-                    CONF_LONG_TIMEOUT: NUMBER_CONFIG[CONF_LONG_TIMEOUT]["default"],
-                    CONF_SHORT_TIMEOUT: NUMBER_CONFIG[CONF_SHORT_TIMEOUT]["default"],
-                    CONF_LIGHT_THRESHOLD: NUMBER_CONFIG[CONF_LIGHT_THRESHOLD][
-                        "default"
-                    ],
-                    CONF_NIGHT_MODE_START: DEFAULT_NIGHT_MODE_START,
-                    CONF_NIGHT_MODE_END: DEFAULT_NIGHT_MODE_END,
-                },
-            )
+            # Validate presence sensor
+            if not await self._async_validate_presence_sensor(
+                user_input[CONF_PRESENCE_SENSOR]
+            ):
+                errors[CONF_PRESENCE_SENSOR] = "invalid_presence_sensor"
+
+            # Validate lights
+            if not await self._async_validate_lights(user_input[CONF_LIGHTS]):
+                errors[CONF_LIGHTS] = "invalid_lights"
+
+            if not errors:
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data={
+                        CONF_NAME: user_input[CONF_NAME],
+                    },
+                    options={
+                        CONF_PRESENCE_SENSOR: user_input[CONF_PRESENCE_SENSOR],
+                        CONF_LIGHTS: user_input[CONF_LIGHTS],
+                        CONF_NIGHT_LIGHTS: [],
+                        CONF_DETECTION_TIMEOUT: NUMBER_CONFIG[CONF_DETECTION_TIMEOUT][
+                            "default"
+                        ],
+                        CONF_LONG_TIMEOUT: NUMBER_CONFIG[CONF_LONG_TIMEOUT]["default"],
+                        CONF_SHORT_TIMEOUT: NUMBER_CONFIG[CONF_SHORT_TIMEOUT][
+                            "default"
+                        ],
+                        CONF_LIGHT_THRESHOLD: NUMBER_CONFIG[CONF_LIGHT_THRESHOLD][
+                            "default"
+                        ],
+                        CONF_NIGHT_MODE_START: DEFAULT_NIGHT_MODE_START,
+                        CONF_NIGHT_MODE_END: DEFAULT_NIGHT_MODE_END,
+                    },
+                )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME): str,
+                    vol.Required(CONF_PRESENCE_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain=BINARY_SENSOR_DOMAIN,
+                        )
+                    ),
+                    vol.Required(CONF_LIGHTS): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain=LIGHT_DOMAIN,
+                            multiple=True,
+                        )
+                    ),
                 }
             ),
+            errors=errors,
         )
 
     def is_matching(self, other_flow: str) -> bool:

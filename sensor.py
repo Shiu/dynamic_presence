@@ -48,13 +48,18 @@ async def async_setup_entry(
             coordinator=coordinator,
             is_night_mode=False,
         ),
-        ManualStatesSensor(
-            coordinator=coordinator,
-            is_night_mode=True,
-        ),
     ]
 
-    if coordinator.light_sensor:
+    # Only add night mode sensor if night lights are configured
+    if coordinator.has_night_mode:
+        entities.append(
+            ManualStatesSensor(
+                coordinator=coordinator,
+                is_night_mode=True,
+            )
+        )
+
+    if coordinator.has_light_sensor:
         entities.append(
             DynamicPresenceSensor(
                 coordinator=coordinator,

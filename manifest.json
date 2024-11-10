@@ -1,7 +1,7 @@
 {
   "domain": "dynamic_presence",
   "name": "Dynamic Presence",
-  "version": "0.4.0",
+  "version": "0.7.5",
   "codeowners": [
     "@Shiu"
   ],
@@ -11,6 +11,6 @@
   "issue_tracker": "https://github.com/Shiu/dynamic_presence/issues",
   "iot_class": "local_polling",
   "requirements": [],
-  "integration_type": "hub",
+  "integration_type": "device",
   "description": "Automatically control lights and devices based on room occupancy and time of day."
 }
