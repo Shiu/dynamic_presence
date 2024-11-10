@@ -251,13 +251,21 @@ class PresenceControl:
 
     @callback
     def _start_countdown_timer(self) -> None:
-        """Start the countdown timer."""
+        """Start the countdown timer.
+
+        Starts counting from where detection_timeout left off:
+        - If detection_timeout was 5s and countdown is 30s
+        - Timer starts at 5s and ends at 30s
+        """
         timeout = (
             self.coordinator.short_timeout
-            if self.coordinator.data.get("binary_sensor_night_mode", False)
+            if self.coordinator.has_night_mode
+            and self.coordinator.data.get("binary_sensor_night_mode", False)
             else self.coordinator.long_timeout
         )
-        self._countdown_timer.start(timeout)
+        # Start from where detection_timeout left off
+        remaining_time = timeout - self.coordinator.detection_timeout
+        self._countdown_timer.start(remaining_time)
 
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""

@@ -205,47 +205,48 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
-        # Load stored manual states
         stored_manual_states = await self._store.async_load()
-        if stored_manual_states and isinstance(stored_manual_states, dict):
-            if "main" in stored_manual_states and "night" in stored_manual_states:
-                self._manual_states = stored_manual_states
-            else:
-                # Convert old format
-                self._manual_states = {
-                    "main": stored_manual_states,
-                    "night": {light: True for light in self.night_lights},
-                }
-        else:
-            # Initialize new room with all lights ON in both modes
-            self._manual_states = {
-                "main": {light: True for light in self.lights},
-                "night": {light: True for light in self.night_lights},
-            }
-            logCoordinator.debug("New room: Initializing all light states to ON")
 
-        # For existing rooms, initialize any new lights
+        # First load stored states if available
+        if stored_manual_states and isinstance(stored_manual_states, dict):
+            self._manual_states = stored_manual_states
+        else:
+            self._manual_states = {}
+
+        # Ensure main states exist and initialize new lights
+        if "main" not in self._manual_states:
+            self._manual_states["main"] = {}
+
+        # Initialize any new main lights to their stored state or True
         for light in self.lights:
             if light not in self._manual_states["main"]:
                 self._manual_states["main"][light] = True
                 logCoordinator.debug("Initializing new main light %s", light)
 
-        for light in self.night_lights:
-            if light not in self._manual_states["night"]:
-                self._manual_states["night"][light] = True
-                logCoordinator.debug("Initializing new night light %s", light)
+        # Handle night mode states if enabled
+        if self.has_night_mode:
+            if "night" not in self._manual_states:
+                self._manual_states["night"] = {}
 
-        # Clean up removed lights from manual states
+            # Initialize any new night lights to their stored state or True
+            for light in self.night_lights:
+                if light not in self._manual_states["night"]:
+                    self._manual_states["night"][light] = True
+                    logCoordinator.debug("Initializing new night light %s", light)
+
+        # Clean up removed lights
         for light in list(self._manual_states["main"].keys()):
             if light not in self.lights:
                 self._manual_states["main"].pop(light)
                 logCoordinator.debug("Removed main light %s", light)
 
-        for light in list(self._manual_states["night"].keys()):
-            if light not in self.night_lights:
-                self._manual_states["night"].pop(light)
-                logCoordinator.debug("Removed night light %s", light)
+        if "night" in self._manual_states:
+            for light in list(self._manual_states["night"].keys()):
+                if light not in self.night_lights:
+                    self._manual_states["night"].pop(light)
+                    logCoordinator.debug("Removed night light %s", light)
 
+        # Save the updated states
         await self._store.async_save()
         self._async_setup_listeners()
 
@@ -346,8 +347,12 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     @property
     def active_lights(self) -> list:
         """Get the currently active light set based on mode."""
-        if not self.night_lights:
+        # First check if night mode is configured
+        if not self.has_night_mode:
             return self.lights
+
+        # If night mode is configured, check if it's currently active
+        # (requires both night mode switch ON and within night time hours)
         return (
             self.night_lights
             if self.data.get("binary_sensor_night_mode", False)
@@ -389,13 +394,20 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 new_state = event.data.get("new_state")
                 if new_state is not None:
                     is_on = new_state.state == STATE_ON
-                    # Store state in the appropriate dictionary
-                    if self._presence_control.is_night_mode_active():
-                        if entity_id in self.night_lights:
-                            self._manual_states["night"][entity_id] = is_on
-                    else:
-                        if entity_id in self.lights:
-                            self._manual_states["main"][entity_id] = is_on
+
+                    # First determine which mode we're in
+                    mode = "main"
+                    if (
+                        self.has_night_mode
+                        and self._presence_control.is_night_mode_active()
+                    ):
+                        mode = "night"
+
+                    # Update the appropriate manual state based on current mode
+                    if mode == "night" and entity_id in self.night_lights:
+                        self._manual_states["night"][entity_id] = is_on
+                    elif mode == "main" and entity_id in self.lights:
+                        self._manual_states["main"][entity_id] = is_on
 
                     await self._store.async_save()
                     await self.async_refresh()
@@ -525,10 +537,23 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     async def _handle_state_changed(self, new_state: RoomState) -> None:
         """Handle room state changes."""
         if new_state == RoomState.OCCUPIED:
-            # Check if we should turn on lights based on Auto-On and Night Manual-On settings
+            # First check light level if sensor configured
+            if self.has_light_sensor:
+                current_light_level = self.data.get("sensor_light_level", 0)
+                if current_light_level >= self.light_threshold:
+                    logCoordinator.debug(
+                        "Light level %s above threshold %s - skipping light activation",
+                        current_light_level,
+                        self.light_threshold,
+                    )
+                    return
             auto_on = self.data.get("switch_auto_on", False)
-            night_manual_on = self.data.get("switch_night_manual_on", False)
-            is_night_mode = self._presence_control.is_night_mode_active()
+            night_manual_on = False
+            is_night_mode = False
+
+            if self.has_night_mode:
+                night_manual_on = self.data.get("switch_night_manual_on", False)
+                is_night_mode = self._presence_control.is_night_mode_active()
 
             # Don't turn on lights if Night Manual-On is enabled during night mode
             if not auto_on or (is_night_mode and night_manual_on):
@@ -596,6 +621,12 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def _handle_mode_changed(self, is_night_mode: bool) -> None:
         """Handle transition between normal and night mode."""
+        if (
+            not self.has_night_mode
+            or self._presence_control.state != RoomState.OCCUPIED
+        ):
+            return
+
         if self._presence_control.state == RoomState.OCCUPIED:
             # Get the new set of lights to control
             lights_to_control = self.night_lights if is_night_mode else self.lights
@@ -710,7 +741,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
         if self._presence_control.state == RoomState.OCCUPIED:
             await self.light_controller.update_active_lights(
-                is_night_mode, lights_to_control, self._manual_states
+                is_night_mode,
+                lights_to_control,
+                self._manual_states,
+                self.has_night_mode,
             )
 
         await self.async_refresh()

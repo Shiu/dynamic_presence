@@ -72,7 +72,11 @@ class LightController:
             logLightController.error("Failed to turn off lights: %s", err)
 
     async def update_active_lights(
-        self, is_night_mode: bool, lights_to_control: list, manual_states: dict
+        self,
+        is_night_mode: bool,
+        lights_to_control: list,
+        manual_states: dict,
+        has_night_mode: bool,
     ) -> None:
         """Update which lights are active based on mode."""
         # Turn off lights that aren't in the new mode's set
@@ -81,8 +85,12 @@ class LightController:
             if light not in lights_to_control:
                 await self.turn_off_lights([light])
 
+        # Use night mode only if it's configured and active
+        mode = "main"
+        if has_night_mode and is_night_mode:
+            mode = "night"
+
         # Turn on lights according to their manual states
-        mode = "night" if is_night_mode else "main"
         lights_to_turn_on = [
             light for light in lights_to_control if manual_states[mode].get(light, True)
         ]
