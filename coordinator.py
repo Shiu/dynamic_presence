@@ -75,6 +75,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     # 1. Core Initialization
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
+        # 1. Parent initialization
         super().__init__(
             hass,
             logger=logCoordinator,
@@ -82,51 +83,26 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=1),
         )
 
+        # 2. Core attributes
         self.hass = hass
         self.entry = entry
         self.room_name = entry.title
-
-        # Initialize storage for runtime data
         self._store = DynamicPresenceStorage(hass, entry.entry_id)
 
-        # Initialize manual states with empty dictionaries
-        self._manual_states = {
-            "main": {},
-            "night": {},
-        }
+        # 3. State containers initialization
+        self._manual_states = {"main": {}, "night": {}}
+        self.data = self._get_default_data()
 
-        # Configuration values from options
-        self.presence_sensor = entry.options.get(CONF_PRESENCE_SENSOR)
-        self.lights = entry.options.get(CONF_LIGHTS, [])
-        self.night_lights = entry.options.get(CONF_NIGHT_LIGHTS, [])
-        self.light_sensor = entry.options.get(CONF_LIGHT_SENSOR)
+        # 4. Configuration attributes
+        self._init_config_attributes()
+        self.update_from_options(entry)
+        self._is_configured = bool(self._presence_sensor and self._lights)
 
-        # Initialize time settings with defaults
-        self.night_mode_start = entry.options.get(
-            CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
-        )
-        self.night_mode_end = entry.options.get(
-            CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
-        )
-
-        # Initialize number settings with defaults
-        self.detection_timeout = entry.options.get(
-            CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
-        )
-        self.long_timeout = entry.options.get(CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT)
-        self.short_timeout = entry.options.get(
-            CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
-        )
-        self.light_threshold = entry.options.get(
-            CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
-        )
-
-        self._is_configured = bool(self.presence_sensor and self.lights)
-
-        # State tracking
+        # 5. Controllers initialization
         self._presence_control = PresenceControl(self)
+        self.light_controller = LightController(hass)
 
-        # Device info
+        # 6. Device info
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=f"Dynamic Presence {self.room_name}",
@@ -134,15 +110,29 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             model="Dynamic Presence Controller",
         )
 
-        # Runtime data initialization - only switches and sensors
-        self.data = {
-            # Binary sensors
+        # Initialize coordinator
+        hass.async_create_task(self.async_initialize())
+
+    def _init_config_attributes(self) -> None:
+        """Initialize configuration attributes with defaults."""
+        self._presence_sensor = None
+        self._lights = []
+        self._night_lights = []
+        self._light_sensor = None
+        self._night_mode_start = DEFAULT_NIGHT_MODE_START
+        self._night_mode_end = DEFAULT_NIGHT_MODE_END
+        self._detection_timeout = DEFAULT_DETECTION_TIMEOUT
+        self._long_timeout = DEFAULT_LONG_TIMEOUT
+        self._short_timeout = DEFAULT_SHORT_TIMEOUT
+        self._light_threshold = DEFAULT_LIGHT_THRESHOLD
+
+    def _get_default_data(self) -> dict[str, Any]:
+        """Get default runtime data."""
+        return {
             "binary_sensor_occupancy": DEFAULT_BINARY_SENSOR_OCCUPANCY,
-            # Sensors
             "sensor_occupancy_duration": DEFAULT_SENSOR_OCCUPANCY_DURATION,
             "sensor_absence_duration": DEFAULT_SENSOR_ABSENCE_DURATION,
             "sensor_light_level": DEFAULT_SENSOR_LIGHT_LEVEL,
-            # Runtime controls (switches only)
             "switch_automation": DEFAULT_SWITCH_AUTOMATION,
             "switch_auto_on": DEFAULT_SWITCH_AUTO_ON,
             "switch_auto_off": DEFAULT_SWITCH_AUTO_OFF,
@@ -152,10 +142,66 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             SENSOR_NIGHT_MANUAL_STATES: DEFAULT_SENSOR_NIGHT_MANUAL_STATES,
         }
 
-        # Initialize coordinator
-        hass.async_create_task(self.async_initialize())
+    # Properties for cached attributes
+    @property
+    def presence_sensor(self) -> str | None:
+        """Get the presence sensor entity ID."""
+        return self._presence_sensor
 
-        self.light_controller = LightController(hass)
+    @property
+    def lights(self) -> list[str]:
+        """Get the list of main lights."""
+        return self._lights
+
+    @property
+    def night_lights(self) -> list[str]:
+        """Get the list of night lights."""
+        return self._night_lights
+
+    @property
+    def light_sensor(self) -> str | None:
+        """Get the light sensor entity ID."""
+        return self._light_sensor
+
+    @property
+    def night_mode_start(self) -> str:
+        """Get night mode start time."""
+        return self._night_mode_start
+
+    @property
+    def night_mode_end(self) -> str:
+        """Get night mode end time."""
+        return self._night_mode_end
+
+    @property
+    def detection_timeout(self) -> int:
+        """Get detection timeout value."""
+        return self._detection_timeout
+
+    @property
+    def long_timeout(self) -> int:
+        """Get long timeout value."""
+        return self._long_timeout
+
+    @property
+    def short_timeout(self) -> int:
+        """Get short timeout value."""
+        return self._short_timeout
+
+    @property
+    def light_threshold(self) -> int:
+        """Get light threshold value."""
+        return self._light_threshold
+
+    @property
+    def has_night_mode(self) -> bool:
+        """Check if night mode is configured."""
+        return bool(self._night_lights)
+
+    @property
+    def has_light_sensor(self) -> bool:
+        """Check if light sensor is configured."""
+        return bool(self._light_sensor)
 
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
@@ -204,9 +250,21 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self._async_setup_listeners()
 
         # Initialize presence state based on current sensor state
-        presence_entity = self.entry.options.get(CONF_PRESENCE_SENSOR)
-        if presence_entity:
-            presence_state = self.hass.states.get(presence_entity)
+        if self.presence_sensor:
+            presence_state = self.hass.states.get(self.presence_sensor)
+            if presence_state:
+                logCoordinator.debug(
+                    "Initializing presence state from sensor: %s", presence_state.state
+                )
+                if presence_state.state == "on":
+                    await self._presence_control.handle_presence_detected()
+                else:
+                    await self._presence_control.handle_presence_lost()
+
+    async def _init_presence_state(self) -> None:
+        """Initialize presence state based on current sensor state."""
+        if self.presence_sensor:
+            presence_state = self.hass.states.get(self.presence_sensor)
             if presence_state:
                 logCoordinator.debug(
                     "Initializing presence state from sensor: %s", presence_state.state
@@ -218,30 +276,28 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     async def async_config_entry_first_refresh(self) -> None:
         """Initialize the coordinator."""
-        # Load runtime states from storage
+        # Load storage once
         await self._store.async_load()
 
-        # Initialize manual states
+        # Initialize states from storage
         stored_manual_states = self._store.data.manual_states
         if stored_manual_states:
-            if isinstance(stored_manual_states, dict):
-                if "main" in stored_manual_states and "night" in stored_manual_states:
-                    self._manual_states = stored_manual_states
-                else:
-                    # Convert old format
-                    self._manual_states = {
-                        "main": stored_manual_states,
-                        "night": {light: True for light in self.night_lights},
-                    }
+            if "main" in stored_manual_states and "night" in stored_manual_states:
+                self._manual_states = stored_manual_states
+            else:
+                # Convert old format
+                self._manual_states = {
+                    "main": stored_manual_states,
+                    "night": {light: True for light in self.night_lights},
+                }
         else:
             # Initialize new room with all lights ON in both modes
             self._manual_states = {
                 "main": {light: True for light in self.lights},
                 "night": {light: True for light in self.night_lights},
             }
-            logCoordinator.debug("New room: Initializing all light states to ON")
 
-        # Initialize switch states from storage
+        # Load switch states
         stored_states = self._store.data.states
         switch_keys = [
             "automation",
@@ -254,6 +310,10 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
             stored_key = f"switch_{key}"
             if stored_key in stored_states:
                 self.data[stored_key] = stored_states[stored_key]
+
+        # Set up listeners and initialize presence state
+        self._async_setup_listeners()
+        await self._init_presence_state()
 
         await self._store.async_save()
         await self._async_update_data()
@@ -286,9 +346,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
     @property
     def active_lights(self) -> list:
         """Get the currently active light set based on mode."""
-        if (
-            not self.night_lights
-        ):  # If no night lights configured, always use main lights
+        if not self.night_lights:
             return self.lights
         return (
             self.night_lights
@@ -366,32 +424,57 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
 
     # 5. Configuration and Options
     @callback
-    def update_from_options(self, entry: ConfigEntry) -> None:
-        """Update configuration from options."""
-        self.presence_sensor = entry.options.get(CONF_PRESENCE_SENSOR)
-        self.lights = entry.options.get(CONF_LIGHTS, [])
-        self.night_lights = entry.options.get(CONF_NIGHT_LIGHTS, [])
-        self.light_sensor = entry.options.get(CONF_LIGHT_SENSOR)
+    def update_from_options(self, entry: ConfigEntry | dict) -> None:
+        """Update configuration from options.
 
-        self.night_mode_start = entry.options.get(
-            CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
-        )
-        self.night_mode_end = entry.options.get(
-            CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
-        )
+        Args:
+            entry: Either a ConfigEntry object or a dict of options
+        """
+        # Get options dict, handling both ConfigEntry and direct dict input
+        options = entry.options if isinstance(entry, ConfigEntry) else entry
 
-        self.detection_timeout = entry.options.get(
+        # Core configuration
+        self._presence_sensor = options.get(CONF_PRESENCE_SENSOR)
+        self._lights = options.get(CONF_LIGHTS, [])
+
+        # Night mode configuration
+        self._night_lights = options.get(CONF_NIGHT_LIGHTS, [])
+        if self.has_night_mode:
+            self._night_mode_start = options.get(
+                CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
+            )
+            self._night_mode_end = options.get(
+                CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
+            )
+            # Initialize night mode manual states if needed
+            if "night" not in self._manual_states:
+                self._manual_states["night"] = {
+                    light: True for light in self._night_lights
+                }
+
+        # Light sensor configuration
+        self._light_sensor = options.get(CONF_LIGHT_SENSOR)
+        if self.has_light_sensor:
+            self._light_threshold = options.get(
+                CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
+            )
+
+        # General timeouts (always needed)
+        self._detection_timeout = options.get(
             CONF_DETECTION_TIMEOUT, DEFAULT_DETECTION_TIMEOUT
         )
-        self.long_timeout = entry.options.get(CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT)
-        self.short_timeout = entry.options.get(
-            CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT
-        )
-        self.light_threshold = entry.options.get(
-            CONF_LIGHT_THRESHOLD, DEFAULT_LIGHT_THRESHOLD
-        )
+        self._long_timeout = options.get(CONF_LONG_TIMEOUT, DEFAULT_LONG_TIMEOUT)
+        self._short_timeout = options.get(CONF_SHORT_TIMEOUT, DEFAULT_SHORT_TIMEOUT)
 
-        self._is_configured = bool(self.presence_sensor and self.lights)
+        self._is_configured = bool(self._presence_sensor and self._lights)
+
+        logCoordinator.debug(
+            "Updated options for %s: presence=%s, lights=%d, night_lights=%d",
+            self.room_name,
+            self._presence_sensor,
+            len(self._lights),
+            len(self._night_lights),
+        )
 
     async def async_save_options(self) -> None:
         """Save manual states to config entry - called during shutdown."""

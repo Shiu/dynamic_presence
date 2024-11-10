@@ -3,20 +3,22 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add a New Room",
-        "description": "Set up dynamic presence control for a room",
+        "title": "Add Dynamic Presence Room",
+        "description": "Set up presence-based light control for a room",
         "data": {
-          "name": "Room Name"
+          "name": "Room Name (e.g., Living Room)",
+          "presence_sensor": "Motion/Occupancy Sensor",
+          "lights": "Main Room Lights"
         }
       }
     },
     "error": {
-      "invalid_presence_sensor": "Selected presence sensor is invalid or not a binary sensor",
-      "invalid_lights": "One or more selected lights are invalid",
+      "invalid_presence_sensor": "Invalid sensor. Must be a motion, occupancy, or presence sensor",
+      "invalid_lights": "Invalid light selection. Please select at least one light",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Room is already configured"
+      "already_configured": "A room with this name already exists"
     }
   },
   "options": {

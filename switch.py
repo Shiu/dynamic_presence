@@ -45,17 +45,24 @@ async def async_setup_entry(
             unique_id=f"{entry.entry_id}_{CONF_AUTO_OFF}",
             key=CONF_AUTO_OFF,
         ),
-        DynamicPresenceSwitch(
-            coordinator=coordinator,
-            unique_id=f"{entry.entry_id}_{CONF_NIGHT_MODE}",
-            key=CONF_NIGHT_MODE,
-        ),
-        DynamicPresenceSwitch(
-            coordinator=coordinator,
-            unique_id=f"{entry.entry_id}_{CONF_NIGHT_MANUAL_ON}",
-            key=CONF_NIGHT_MANUAL_ON,
-        ),
     ]
+
+    # Only add night mode switches if night mode is configured
+    if coordinator.has_night_mode:
+        entities.extend(
+            [
+                DynamicPresenceSwitch(
+                    coordinator=coordinator,
+                    unique_id=f"{entry.entry_id}_{CONF_NIGHT_MODE}",
+                    key=CONF_NIGHT_MODE,
+                ),
+                DynamicPresenceSwitch(
+                    coordinator=coordinator,
+                    unique_id=f"{entry.entry_id}_{CONF_NIGHT_MANUAL_ON}",
+                    key=CONF_NIGHT_MANUAL_ON,
+                ),
+            ]
+        )
 
     async_add_entities(entities)
 

@@ -23,22 +23,27 @@ async def async_setup_entry(
     """Set up binary sensors from config entry."""
     coordinator: DynamicPresenceCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities(
-        [
-            DynamicPresenceBinarySensor(
-                coordinator=coordinator,
-                unique_id=f"{entry.entry_id}_occupancy",
-                key="occupancy",
-                device_class=BinarySensorDeviceClass.OCCUPANCY,
-            ),
+    entities = [
+        DynamicPresenceBinarySensor(
+            coordinator=coordinator,
+            unique_id=f"{entry.entry_id}_occupancy",
+            key="occupancy",
+            device_class=BinarySensorDeviceClass.OCCUPANCY,
+        ),
+    ]
+
+    # Only add night mode sensor if night mode is configured
+    if coordinator.has_night_mode:
+        entities.append(
             DynamicPresenceBinarySensor(
                 coordinator=coordinator,
                 unique_id=f"{entry.entry_id}_night_mode",
                 key="night_mode",
                 device_class=None,
-            ),
-        ]
-    )
+            )
+        )
+
+    async_add_entities(entities)
 
 
 class DynamicPresenceBinarySensor(  # pylint: disable=abstract-method
