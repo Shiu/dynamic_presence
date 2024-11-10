@@ -10,6 +10,8 @@ from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
+from .const import CONF_ADJACENT_ROOMS, DOMAIN
+
 
 if TYPE_CHECKING:
     from .coordinator import DynamicPresenceCoordinator
@@ -147,31 +149,150 @@ class PresenceControl:
 
     # 3. State Management
     async def _update_state(self, new_state: RoomState) -> None:
-        """Update state and notify coordinator."""
-        if new_state == self._state:
-            return
-
-        if not self._validate_state_transition(new_state):
-            return
-
-        logPresenceControl.info(
-            "State transition: %s -> %s (last presence: %s)",
-            self._state.value,
+        """Update state and handle state-specific actions."""
+        logPresenceControl.debug(
+            "State transition: %s -> %s",
+            self._state.value if self._state else "None",
             new_state.value,
-            self._last_presence_time,
         )
 
-        self._state = new_state
+        if new_state == RoomState.VACANT:
+            # First check if any room that lists us as adjacent has presence
+            for entry_id, coordinator in self.hass.data[DOMAIN].items():
+                if entry_id == self.coordinator.entry.entry_id:
+                    continue  # Skip self
 
-        if new_state == RoomState.OCCUPIED:
-            self._occupancy_start_time = dt_util.utcnow()
+                adjacent_rooms = coordinator.entry.options.get(CONF_ADJACENT_ROOMS, [])
+                if (
+                    self.coordinator.entry.entry_id in adjacent_rooms
+                    and coordinator.presence_control.state == RoomState.OCCUPIED
+                ):
+                    logPresenceControl.debug(
+                        "Room %s has presence and lists us as adjacent, keeping lights on",
+                        coordinator.room_name,
+                    )
+                    # Update state but don't turn off any lights
+                    self._state = new_state
+                    await self.coordinator.async_refresh()
+                    return
+
+            # No rooms with presence list us as adjacent, proceed with turning off lights
+            auto_off = self.coordinator.data.get("switch_auto_off", False)
+            if auto_off:
+                # Turn off local lights
+                all_lights = set(
+                    self.coordinator.lights + self.coordinator.night_lights
+                )
+                await self.coordinator.light_controller.turn_off_lights(
+                    list(all_lights)
+                )
+                logPresenceControl.debug("Turned off local room lights: %s", all_lights)
+
+                # Turn off lights in our adjacent rooms if they're vacant
+                adjacent_rooms = self.coordinator.entry.options.get(
+                    CONF_ADJACENT_ROOMS, []
+                )
+                for room_id in adjacent_rooms:
+                    coordinator = self.hass.data[DOMAIN].get(room_id)
+                    if (
+                        coordinator
+                        and coordinator.presence_control.state == RoomState.VACANT
+                    ):
+                        await coordinator.light_controller.turn_off_lights(
+                            coordinator.active_lights
+                        )
+                        logPresenceControl.debug(
+                            "Turned off adjacent room %s lights: %s",
+                            coordinator.room_name,
+                            coordinator.active_lights,
+                        )
+
+        elif new_state == RoomState.OCCUPIED:
+            # Handle local room first
+            auto_on = self.coordinator.data.get("switch_auto_on", False)
+            is_night_mode = (
+                self.coordinator.is_night_mode_active()
+                if self.coordinator.has_night_mode
+                else False
+            )
+            night_manual_on = (
+                self.coordinator.data.get("switch_night_manual_on", False)
+                if self.coordinator.has_night_mode
+                else False
+            )
+
+            if auto_on and (not is_night_mode or not night_manual_on):
+                lights_to_control = (
+                    self.coordinator.night_lights
+                    if (self.coordinator.has_night_mode and is_night_mode)
+                    else self.coordinator.lights
+                )
+
+                logPresenceControl.debug(
+                    "Turning on local room lights: %s (night_mode: %s, night_manual_on: %s)",
+                    lights_to_control,
+                    is_night_mode,
+                    night_manual_on,
+                )
+                await self.coordinator.light_controller.turn_on_lights(
+                    lights_to_control
+                )
+
+            # Then handle adjacent rooms
+            adjacent_rooms = self.coordinator.entry.options.get(CONF_ADJACENT_ROOMS, [])
+            logPresenceControl.debug("Adjacent rooms configured: %s", adjacent_rooms)
+
+            for room_id in adjacent_rooms:
+                coordinator = self.hass.data[DOMAIN].get(room_id)
+                if (
+                    coordinator
+                    and coordinator.presence_control.state == RoomState.VACANT
+                ):
+                    if coordinator.has_light_sensor:
+                        light_level = coordinator.data.get("sensor_light_level", 0)
+                        logPresenceControl.debug(
+                            "Adjacent room %s light level: %s (threshold: %s)",
+                            room_id,
+                            light_level,
+                            coordinator.light_threshold,
+                        )
+                        if light_level >= coordinator.light_threshold:
+                            continue
+
+                    lights_to_control = coordinator.active_lights
+                    logPresenceControl.debug(
+                        "Turning on adjacent room %s lights: %s",
+                        room_id,
+                        lights_to_control,
+                    )
+                    await coordinator.light_controller.turn_on_lights(lights_to_control)
+
         elif new_state == RoomState.VACANT:
-            self._occupancy_start_time = None
+            # Handle local room first
+            auto_off = self.coordinator.data.get("switch_auto_off", False)
+            if auto_off:
+                all_lights = set(
+                    self.coordinator.lights + self.coordinator.night_lights
+                )
+                await self.coordinator.light_controller.turn_off_lights(
+                    list(all_lights)
+                )
+                logPresenceControl.debug("Turned off local room lights: %s", all_lights)
 
-        try:
-            await self.coordinator.async_handle_state_changed(new_state)
-        except (HomeAssistantError, ServiceNotFound) as err:
-            logPresenceControl.error("Error notifying coordinator: %s", err)
+            # Then clean up adjacent rooms
+            adjacent_rooms = self.coordinator.entry.options.get(CONF_ADJACENT_ROOMS, [])
+            for room_id in adjacent_rooms:
+                coordinator = self.hass.data[DOMAIN].get(room_id)
+                if (
+                    coordinator
+                    and coordinator.presence_control.state == RoomState.VACANT
+                ):
+                    await coordinator.light_controller.turn_off_lights(
+                        coordinator.active_lights
+                    )
+
+        self._state = new_state
+        await self.coordinator.async_refresh()
 
     def _validate_state_transition(self, new_state: RoomState) -> bool:
         """Validate state transition."""
@@ -190,34 +311,6 @@ class PresenceControl:
             )
             return False
         return True
-
-    async def handle_presence_detected(self) -> None:
-        """Handle presence detection."""
-        if self._state != RoomState.OCCUPIED:
-            logPresenceControl.debug("Presence detected - transitioning to occupied")
-            self._cancel_timers()
-            await self._update_state(RoomState.OCCUPIED)
-        else:
-            logPresenceControl.debug("Already in occupied state")
-
-    async def handle_presence_lost(self) -> None:
-        """Handle loss of presence from OCCUPIED state."""
-        if self._state == RoomState.OCCUPIED:
-            self._last_presence_time = dt_util.utcnow()
-
-            if self.coordinator.light_controller.check_any_lights_on(
-                self.active_lights
-            ):
-                await self._update_state(RoomState.DETECTION_TIMEOUT)
-                self._start_detection_timer()
-            else:
-                logPresenceControl.debug("All lights already off - room is vacant")
-                await self._update_state(RoomState.VACANT)
-        else:
-            logPresenceControl.debug(
-                "Ignoring presence lost in %s state",
-                self._state.value,
-            )
 
     async def handle_detection_timeout(self) -> None:
         """Handle detection timeout completion."""
@@ -344,3 +437,10 @@ class PresenceControl:
         if self._state == RoomState.OCCUPIED:
             await self._update_state(RoomState.DETECTION_TIMEOUT)
             self._start_detection_timer()
+
+    async def initialize_from_state(self, state: str) -> None:
+        """Initialize presence control from sensor state."""
+        if state == "on":
+            await self._on_presence_sensor_activated()
+        else:
+            await self._on_presence_sensor_deactivated()

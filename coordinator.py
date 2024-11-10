@@ -203,6 +203,11 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         """Check if light sensor is configured."""
         return bool(self._light_sensor)
 
+    @property
+    def presence_control(self) -> "PresenceControl":
+        """Return the presence control instance."""
+        return self._presence_control
+
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
         stored_manual_states = await self._store.async_load()
@@ -251,16 +256,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
         self._async_setup_listeners()
 
         # Initialize presence state based on current sensor state
-        if self.presence_sensor:
-            presence_state = self.hass.states.get(self.presence_sensor)
-            if presence_state:
-                logCoordinator.debug(
-                    "Initializing presence state from sensor: %s", presence_state.state
-                )
-                if presence_state.state == "on":
-                    await self._presence_control.handle_presence_detected()
-                else:
-                    await self._presence_control.handle_presence_lost()
+        await self._init_presence_state()
 
     async def _init_presence_state(self) -> None:
         """Initialize presence state based on current sensor state."""
@@ -270,10 +266,7 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                 logCoordinator.debug(
                     "Initializing presence state from sensor: %s", presence_state.state
                 )
-                if presence_state.state == "on":
-                    await self._presence_control.handle_presence_detected()
-                else:
-                    await self._presence_control.handle_presence_lost()
+                await self._presence_control.initialize_from_state(presence_state.state)
 
     async def async_config_entry_first_refresh(self) -> None:
         """Initialize the coordinator."""
