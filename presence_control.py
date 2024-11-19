@@ -208,7 +208,6 @@ class PresenceControl:
                         )
 
         elif new_state == RoomState.OCCUPIED:
-            # Handle local room first
             auto_on = self.coordinator.data.get("switch_auto_on", False)
             is_night_mode = (
                 self.coordinator.is_night_mode_active()
@@ -222,21 +221,36 @@ class PresenceControl:
             )
 
             if auto_on and (not is_night_mode or not night_manual_on):
+                mode = "night" if is_night_mode else "main"
                 lights_to_control = (
-                    self.coordinator.night_lights
-                    if (self.coordinator.has_night_mode and is_night_mode)
-                    else self.coordinator.lights
+                    self.coordinator.active_lights
+                )  # Use active_lights property to get correct set
+
+                # Check if ALL manual states are OFF
+                all_lights_off = all(
+                    not self.coordinator.manual_states[mode].get(light, True)
+                    for light in lights_to_control
                 )
 
-                logPresenceControl.debug(
-                    "Turning on local room lights: %s (night_mode: %s, night_manual_on: %s)",
-                    lights_to_control,
-                    is_night_mode,
-                    night_manual_on,
-                )
-                await self.coordinator.light_controller.turn_on_lights(
-                    lights_to_control
-                )
+                if all_lights_off:
+                    # Reset all manual states to ON
+                    self.coordinator.manual_states[mode] = {
+                        light: True for light in lights_to_control
+                    }
+                    await self.coordinator.light_controller.turn_on_lights(
+                        lights_to_control
+                    )
+                else:
+                    # Only turn on lights that were ON in manual states
+                    lights_to_turn_on = [
+                        light
+                        for light in lights_to_control
+                        if self.coordinator.manual_states[mode].get(light, True)
+                    ]
+                    if lights_to_turn_on:
+                        await self.coordinator.light_controller.turn_on_lights(
+                            lights_to_turn_on
+                        )
 
             # Then handle adjacent rooms
             adjacent_rooms = self.coordinator.entry.options.get(CONF_ADJACENT_ROOMS, [])
@@ -268,7 +282,7 @@ class PresenceControl:
                     await coordinator.light_controller.turn_on_lights(lights_to_control)
 
         elif new_state == RoomState.VACANT:
-            # Handle local room first
+            # Handle local room first #
             auto_off = self.coordinator.data.get("switch_auto_off", False)
             if auto_off:
                 all_lights = set(
@@ -343,12 +357,12 @@ class PresenceControl:
         self._detection_timer.start(self.coordinator.detection_timeout)
 
     @callback
-    def _start_countdown_timer(self) -> None:
+    def _start_countdown_timer(self, subtract_detection: bool = True) -> None:
         """Start the countdown timer.
 
-        Starts counting from where detection_timeout left off:
-        - If detection_timeout was 5s and countdown is 30s
-        - Timer starts at 5s and ends at 30s
+        Args:
+            subtract_detection: If True, starts counting from where detection_timeout left off.
+                                If False, uses full countdown duration.
         """
         timeout = (
             self.coordinator.short_timeout
@@ -356,14 +370,16 @@ class PresenceControl:
             and self.coordinator.data.get("binary_sensor_night_mode", False)
             else self.coordinator.long_timeout
         )
-        # Start from where detection_timeout left off
-        remaining_time = timeout - self.coordinator.detection_timeout
-        self._countdown_timer.start(remaining_time)
+
+        if subtract_detection:
+            timeout = timeout - self.coordinator.detection_timeout
+
+        self._countdown_timer.start(timeout)
 
     async def start_countdown_from_vacant(self) -> None:
         """Start countdown timer when a light is turned on while vacant."""
         await self._update_state(RoomState.COUNTDOWN)
-        self._start_countdown_timer()
+        self._start_countdown_timer(subtract_detection=False)
 
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""
