@@ -360,6 +360,11 @@ class PresenceControl:
         remaining_time = timeout - self.coordinator.detection_timeout
         self._countdown_timer.start(remaining_time)
 
+    async def start_countdown_from_vacant(self) -> None:
+        """Start countdown timer when a light is turned on while vacant."""
+        await self._update_state(RoomState.COUNTDOWN)
+        self._start_countdown_timer()
+
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""
         if self._state == RoomState.DETECTION_TIMEOUT:

@@ -391,6 +391,14 @@ class DynamicPresenceCoordinator(DataUpdateCoordinator):
                     err,
                     exc_info=True,
                 )
+        elif self._presence_control.state == RoomState.VACANT:
+            # If light turned ON while room is vacant, start countdown
+            if new_state.state == STATE_ON:
+                logCoordinator.debug(
+                    "Light turned on while vacant - starting countdown: %s",
+                    entity_id,
+                )
+                await self._presence_control.start_countdown_from_vacant()
 
     async def _apply_light_states(self) -> None:
         """Apply stored light states or turn on lights."""
