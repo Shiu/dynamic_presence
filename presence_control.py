@@ -363,11 +363,7 @@ class PresenceControl:
     async def _detection_timer_finished(self, _now) -> None:
         """Handle detection timer completion."""
         if self._state == RoomState.DETECTION_TIMEOUT:
-            logPresenceControl.debug(
-                "Detection timeout expired, transitioning to countdown"
-            )
-            await self._update_state(RoomState.COUNTDOWN)
-            self._start_countdown_timer()
+            await self.handle_detection_timeout()
 
     async def _countdown_timer_finished(self, _now) -> None:
         """Handle countdown timer completion."""
