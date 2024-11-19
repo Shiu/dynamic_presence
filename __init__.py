@@ -37,7 +37,7 @@ logInit = logging.getLogger("dynamic_presence.init")
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dynamic Presence from a config entry."""
     coordinator = DynamicPresenceCoordinator(hass, entry)
-    await coordinator.async_initialize()
+    await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
