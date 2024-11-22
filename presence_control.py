@@ -149,7 +149,14 @@ class PresenceControl:
 
     # 3. State Management
     async def _update_state(self, new_state: RoomState) -> None:
-        """Update state and handle state-specific actions."""
+        """Update room state."""
+        # Check if automation is enabled
+        if not self.coordinator.data.get("switch_automation", True):
+            logPresenceControl.debug(
+                "Room automation disabled - ignoring state change to %s", new_state
+            )
+            return
+
         logPresenceControl.debug(
             "State transition: %s -> %s",
             self._state.value if self._state else "None",
