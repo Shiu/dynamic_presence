@@ -269,6 +269,14 @@ class PresenceControl:
                     coordinator
                     and coordinator.presence_control.state == RoomState.VACANT
                 ):
+                    # Check if automation is enabled for adjacent room
+                    if not coordinator.data.get("switch_automation", True):
+                        logPresenceControl.debug(
+                            "Adjacent room %s has automation disabled - skipping",
+                            coordinator.room_name,
+                        )
+                        continue
+
                     if coordinator.has_light_sensor:
                         light_level = coordinator.data.get("sensor_light_level", 0)
                         logPresenceControl.debug(
