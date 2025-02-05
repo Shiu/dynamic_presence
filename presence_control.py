@@ -269,10 +269,29 @@ class PresenceControl:
                     coordinator
                     and coordinator.presence_control.state == RoomState.VACANT
                 ):
-                    # Check if automation is enabled for adjacent room
+                    # Check if automation is enabled
                     if not coordinator.data.get("switch_automation", True):
                         logPresenceControl.debug(
                             "Adjacent room %s has automation disabled - skipping",
+                            coordinator.room_name,
+                        )
+                        continue
+
+                    # Check night mode manual-on setting
+                    is_night_mode = (
+                        coordinator.is_night_mode_active()
+                        if coordinator.has_night_mode
+                        else False
+                    )
+                    night_manual_on = (
+                        coordinator.data.get("switch_night_manual_on", False)
+                        if coordinator.has_night_mode
+                        else False
+                    )
+
+                    if is_night_mode and night_manual_on:
+                        logPresenceControl.debug(
+                            "Adjacent room %s has night manual-on enabled - skipping",
                             coordinator.room_name,
                         )
                         continue
