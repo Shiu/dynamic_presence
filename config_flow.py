@@ -155,10 +155,6 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
 class DynamicPresenceOptionsFlow(OptionsFlow):
     """Handle options flow for Dynamic Presence."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-
     def _get_adjacent_room_options(self) -> list[selector.SelectOptionDict]:
         """Get list of available adjacent rooms."""
         return [
