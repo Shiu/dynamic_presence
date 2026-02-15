@@ -51,7 +51,7 @@ class DynamicPresenceConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> DynamicPresenceOptionsFlow:
         """Get the options flow for this handler."""
-        return DynamicPresenceOptionsFlow(config_entry)
+        return DynamicPresenceOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
