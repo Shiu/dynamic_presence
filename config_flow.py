@@ -316,19 +316,6 @@ class DynamicPresenceOptionsFlow(OptionsFlow):
                         mode="dropdown",
                     )
                 ),
-                # Time Settings - Group 2
-                vol.Required(
-                    CONF_NIGHT_MODE_START,
-                    default=self.config_entry.options.get(
-                        CONF_NIGHT_MODE_START, DEFAULT_NIGHT_MODE_START
-                    ),
-                ): selector.TimeSelector(),
-                vol.Required(
-                    CONF_NIGHT_MODE_END,
-                    default=self.config_entry.options.get(
-                        CONF_NIGHT_MODE_END, DEFAULT_NIGHT_MODE_END
-                    ),
-                ): selector.TimeSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
